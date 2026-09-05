@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,8 +18,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Info
@@ -26,6 +29,7 @@ import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Explore
@@ -34,13 +38,19 @@ import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -71,6 +81,12 @@ import com.example.data.remote.GeminiClient
 import com.example.data.repository.EnglishLearningRepository
 import com.example.ui.theme.AmberTertiary
 import com.example.ui.theme.EmeraldSuccess
+
+sealed interface AppOverlay {
+    data class Roleplay(val scenarioId: String? = null) : AppOverlay
+    data object Vocabulary : AppOverlay
+    data object StreakStats : AppOverlay
+}
 
 sealed class NavigationTab(
     val title: String,
@@ -103,6 +119,7 @@ fun MainScreen() {
     }
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
+    var overlayScreen by remember { mutableStateOf<AppOverlay?>(null) }
     val tabs = listOf(
         NavigationTab.Learn,
         NavigationTab.Practice,
@@ -110,6 +127,10 @@ fun MainScreen() {
         NavigationTab.Speaking,
         NavigationTab.Mistakes
     )
+
+    BackHandler(enabled = overlayScreen != null) {
+        overlayScreen = null
+    }
 
     var showInfoDialog by remember { mutableStateOf(false) }
     val hasGeminiKey = remember { GeminiClient.hasValidApiKey() }
@@ -158,7 +179,10 @@ fun MainScreen() {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = AmberTertiary.copy(alpha = 0.15f),
-                        modifier = Modifier.padding(start = 12.dp)
+                        modifier = Modifier
+                            .padding(start = 12.dp)
+                            .clickable { overlayScreen = AppOverlay.StreakStats }
+                            .testTag("streak_button")
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -182,6 +206,20 @@ fun MainScreen() {
                 },
                 actions = {
                     IconButton(
+                        onClick = {
+                            ttsHelper.stop()
+                            speechHelper.stopListening()
+                            overlayScreen = AppOverlay.Vocabulary
+                        },
+                        modifier = Modifier.testTag("top_vocab_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                            contentDescription = "Vocabulary Vault & SRS",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(
                         onClick = { showInfoDialog = true },
                         modifier = Modifier.testTag("app_info_button")
                     ) {
@@ -198,73 +236,103 @@ fun MainScreen() {
             )
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 6.dp
-            ) {
-                tabs.forEachIndexed { index, tab ->
-                    val isSelected = selectedTabIndex == index
-                    NavigationBarItem(
-                        selected = isSelected,
-                        onClick = {
-                            selectedTabIndex = index
-                            ttsHelper.stop()
-                            speechHelper.stopListening()
-                        },
-                        icon = {
-                            Icon(
-                                imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
-                                contentDescription = tab.title
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = tab.title,
-                                fontSize = 10.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
-                        modifier = Modifier.testTag(tab.testTag)
-                    )
+            if (overlayScreen == null) {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 6.dp
+                ) {
+                    tabs.forEachIndexed { index, tab ->
+                        val isSelected = selectedTabIndex == index
+                        NavigationBarItem(
+                            selected = isSelected,
+                            onClick = {
+                                selectedTabIndex = index
+                                ttsHelper.stop()
+                                speechHelper.stopListening()
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
+                                    contentDescription = tab.title
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = tab.title,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            modifier = Modifier.testTag(tab.testTag)
+                        )
+                    }
                 }
             }
         }
     ) { innerPadding ->
-        Crossfade(
-            targetState = selectedTabIndex,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            label = "tab_crossfade"
-        ) { tabIndex ->
-            when (tabIndex) {
-                0 -> LearnRoadmapScreen(
+        when (val overlay = overlayScreen) {
+            is AppOverlay.Roleplay -> {
+                RoleplayScreen(
                     repository = repository,
                     ttsHelper = ttsHelper,
                     speechHelper = speechHelper,
-                    onLaunchRoleplay = { _ -> selectedTabIndex = 1 }
+                    initialScenarioId = overlay.scenarioId,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                    onBack = { overlayScreen = null }
                 )
-                1 -> TopicChatPracticeScreen(
+            }
+            is AppOverlay.Vocabulary -> {
+                VocabularyScreen(
                     repository = repository,
                     ttsHelper = ttsHelper,
-                    speechHelper = speechHelper
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                    onBack = { overlayScreen = null }
                 )
-                2 -> LiveCallScreen(
-                    repository = repository,
-                    ttsHelper = ttsHelper,
-                    speechHelper = speechHelper,
-                    onNavigateToWeaknessLog = { selectedTabIndex = 4 }
-                )
-                3 -> SpeakingScreen(
-                    repository = repository,
-                    ttsHelper = ttsHelper,
-                    speechHelper = speechHelper,
-                    onNavigateToWeaknessLog = { selectedTabIndex = 4 }
-                )
-                4 -> WeaknessLogScreen(
-                    repository = repository,
-                    ttsHelper = ttsHelper
-                )
+            }
+            else -> {
+                Crossfade(
+                    targetState = selectedTabIndex,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                    label = "tab_crossfade"
+                ) { tabIndex ->
+                    when (tabIndex) {
+                        0 -> LearnRoadmapScreen(
+                            repository = repository,
+                            ttsHelper = ttsHelper,
+                            speechHelper = speechHelper,
+                            onLaunchRoleplay = { scenarioId ->
+                                overlayScreen = AppOverlay.Roleplay(scenarioId)
+                            }
+                        )
+                        1 -> TopicChatPracticeScreen(
+                            repository = repository,
+                            ttsHelper = ttsHelper,
+                            speechHelper = speechHelper
+                        )
+                        2 -> LiveCallScreen(
+                            repository = repository,
+                            ttsHelper = ttsHelper,
+                            speechHelper = speechHelper,
+                            onNavigateToWeaknessLog = { selectedTabIndex = 4 }
+                        )
+                        3 -> SpeakingScreen(
+                            repository = repository,
+                            ttsHelper = ttsHelper,
+                            speechHelper = speechHelper,
+                            onNavigateToWeaknessLog = { selectedTabIndex = 4 }
+                        )
+                        4 -> WeaknessLogScreen(
+                            repository = repository,
+                            ttsHelper = ttsHelper
+                        )
+                    }
+                }
             }
         }
     }
@@ -327,4 +395,170 @@ fun MainScreen() {
             }
         )
     }
+
+    if (overlayScreen == AppOverlay.StreakStats) {
+        StreakStatsDialog(
+            onDismiss = { overlayScreen = null },
+            onOpenVocab = { overlayScreen = AppOverlay.Vocabulary },
+            onOpenRoleplay = { overlayScreen = AppOverlay.Roleplay() }
+        )
+    }
+}
+
+@Composable
+fun StreakStatsDialog(
+    onDismiss: () -> Unit,
+    onOpenVocab: () -> Unit,
+    onOpenRoleplay: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.LocalFireDepartment,
+                    contentDescription = null,
+                    tint = AmberTertiary,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "5-Day Learning Streak",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    text = "Consistent daily speaking builds fluency 3x faster. Keep up the momentum!",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // Week days indicators
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        val days = listOf("M", "T", "W", "T", "F", "S", "S")
+                        days.forEachIndexed { idx, day ->
+                            val isCompleted = idx < 5
+                            val isToday = idx == 4
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = day,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isToday) AmberTertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(26.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (isCompleted) EmeraldSuccess else MaterialTheme.colorScheme.surface
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isCompleted) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = "Completed",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.outlineVariant)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Daily targets
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Today's Target",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Speaking Practice", style = MaterialTheme.typography.bodySmall)
+                            Text("12 / 15 min", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { 0.80f },
+                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            color = EmeraldSuccess
+                        )
+                    }
+
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Vocabulary Mastered", style = MaterialTheme.typography.bodySmall)
+                            Text("8 / 10 words", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { 0.80f },
+                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                // Quick Launch Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onOpenVocab,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Learn Vocab", fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = onOpenRoleplay,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("Roleplay", fontSize = 12.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }

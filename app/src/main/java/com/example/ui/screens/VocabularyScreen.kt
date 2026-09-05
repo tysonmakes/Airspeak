@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -30,7 +32,6 @@ import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Style
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -82,7 +83,8 @@ import kotlinx.coroutines.launch
 fun VocabularyScreen(
     repository: EnglishLearningRepository,
     ttsHelper: TextToSpeechHelper,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val allWords by repository.allWords.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -107,9 +109,33 @@ fun VocabularyScreen(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
+        contentPadding = PaddingValues(top = if (onBack != null) 4.dp else 12.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        if (onBack != null) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back to roadmap"
+                        )
+                    }
+                    Text(
+                        text = "Vocabulary Vault & SRS",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+
         // Hero Card
         item {
             ElevatedCard(
@@ -459,7 +485,7 @@ fun VocabularyScreen(
                                     modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.VolumeUp,
+                                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                                         contentDescription = "Pronounce",
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(18.dp)
@@ -563,7 +589,7 @@ fun QuizSection(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 IconButton(onClick = { ttsHelper.speak(currentTarget.word) }) {
-                    Icon(Icons.Default.VolumeUp, contentDescription = "Hear word", tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Hear word", tint = MaterialTheme.colorScheme.primary)
                 }
             }
 

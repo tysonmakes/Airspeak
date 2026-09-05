@@ -26,7 +26,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.Flight
@@ -35,7 +37,6 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -83,13 +84,24 @@ fun RoleplayScreen(
     repository: EnglishLearningRepository,
     ttsHelper: TextToSpeechHelper,
     speechHelper: SpeechRecognitionHelper,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    initialScenarioId: String? = null,
+    onBack: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    var currentScenario by remember { mutableStateOf(DefaultData.roleplayScenarios.first()) }
+    var currentScenario by remember(initialScenarioId) {
+        mutableStateOf(
+            if (initialScenarioId != null) {
+                DefaultData.roleplayScenarios.find { it.id == initialScenarioId }
+                    ?: DefaultData.roleplayScenarios.first()
+            } else {
+                DefaultData.roleplayScenarios.first()
+            }
+        )
+    }
     val messages by repository.getRoleplayMessages(currentScenario.id)
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
@@ -135,8 +147,31 @@ fun RoleplayScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(bottom = 76.dp)
+            .padding(bottom = if (onBack != null) 16.dp else 76.dp)
     ) {
+        if (onBack != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to roadmap"
+                    )
+                }
+                Text(
+                    text = "AI Conversational Roleplay",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+
         // Scenario Selector Bar
         Surface(
             color = MaterialTheme.colorScheme.surface,
@@ -308,7 +343,7 @@ fun RoleplayScreen(
                                             modifier = Modifier.size(24.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.VolumeUp,
+                                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                                                 contentDescription = "Read aloud",
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(18.dp)
