@@ -1,0 +1,6 @@
+{
+  "name": "AirSpeak",
+  "description": "AI-powered English speaking fluency coach, real-time accent and grammar feedback, spaced-repetition vocabulary builder, and error weakness log.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
