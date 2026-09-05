@@ -603,7 +603,7 @@ class AiEvaluationService {
 
                     return@withContext RoleplayTurnResult(
                         aiResponse = json.optString("aiResponse"),
-                        coachingFeedback = json.optString("coachingFeedback", null),
+                        coachingFeedback = if (json.isNull("coachingFeedback")) null else json.optString("coachingFeedback").takeIf { it.isNotBlank() },
                         grammarCorrection = correction
                     )
                 }
