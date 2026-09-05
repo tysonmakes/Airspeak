@@ -30,7 +30,10 @@ class SpeechRecognitionHelper(private val context: Context) {
 
     private var onFinalResultCallback: ((String) -> Unit)? = null
 
-    fun startListening(onResult: (String) -> Unit) {
+    fun startListening(
+        silenceTimeoutMs: Long = 800L,
+        onResult: (String) -> Unit
+    ) {
         onFinalResultCallback = onResult
         _currentText.value = ""
 
@@ -71,6 +74,11 @@ class SpeechRecognitionHelper(private val context: Context) {
                             else -> "Recognition error: $error"
                         }
                         Log.w("SpeechRecognitionHelper", message)
+                        // If we captured partial text before an error or timeout, deliver it!
+                        val fallback = _currentText.value.trim()
+                        if (fallback.isNotBlank()) {
+                            onFinalResultCallback?.invoke(fallback)
+                        }
                     }
 
                     override fun onResults(results: Bundle?) {
@@ -98,14 +106,30 @@ class SpeechRecognitionHelper(private val context: Context) {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US.toString())
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-US")
+                putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, "en-US")
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, silenceTimeoutMs)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, silenceTimeoutMs.coerceAtMost(700L))
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 600L)
             }
 
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
             Log.e("SpeechRecognitionHelper", "Failed to start speech recognition", e)
             _isListening.value = false
+        }
+    }
+
+    /**
+     * Force immediate completion of the current spoken turn (Zero waiting for silence).
+     */
+    fun completeSpeechNow() {
+        val text = _currentText.value.trim()
+        stopListening()
+        if (text.isNotBlank()) {
+            onFinalResultCallback?.invoke(text)
         }
     }
 

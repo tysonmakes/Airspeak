@@ -23,8 +23,28 @@ class TextToSpeechHelper(context: Context) {
         tts = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.US
-                tts?.setSpeechRate(0.95f) // Optimized for language learning clarity
-                tts?.setPitch(1.0f)
+                // Relaxed, natural conversational human pace (0.88f) instead of fast robotic 0.95f
+                tts?.setSpeechRate(0.88f)
+                tts?.setPitch(1.02f)
+
+                // Select the highest quality natural human voice available on the device
+                try {
+                    val voices = tts?.voices
+                    if (!voices.isNullOrEmpty()) {
+                        // Look for natural, high-quality, non-network latency voices
+                        val bestVoice = voices.find { voice ->
+                            voice.locale.language == Locale.US.language &&
+                            !voice.isNetworkConnectionRequired &&
+                            (voice.quality >= android.speech.tts.Voice.QUALITY_HIGH || voice.name.contains("en-us-x", ignoreCase = true))
+                        } ?: voices.find { it.locale == Locale.US }
+                        if (bestVoice != null) {
+                            tts?.voice = bestVoice
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("TextToSpeechHelper", "Default voice used: ${e.message}")
+                }
+
                 isInitialized = true
 
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -52,7 +72,16 @@ class TextToSpeechHelper(context: Context) {
         }
     }
 
-    fun setVoiceProfile(locale: Locale = Locale.US, speechRate: Float = 0.95f, pitch: Float = 1.0f) {
+    fun setSpeechRate(rate: Float) {
+        if (!isInitialized || tts == null) return
+        try {
+            tts?.setSpeechRate(rate.coerceIn(0.6f, 1.5f))
+        } catch (e: Exception) {
+            Log.w("TextToSpeechHelper", "Failed setting speech rate", e)
+        }
+    }
+
+    fun setVoiceProfile(locale: Locale = Locale.US, speechRate: Float = 0.88f, pitch: Float = 1.0f) {
         if (!isInitialized || tts == null) return
         try {
             tts?.language = locale

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.HistoryEdu
 import androidx.compose.material.icons.filled.List
@@ -215,29 +216,58 @@ fun WeaknessLogScreen(
 
         // TAB 0: MISTAKE BANK LIST
         if (selectedTab == 0) {
-            // Category Filter Chips
+            // Category Filter Chips and Clear All Option
             item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val categories = listOf("All", "Grammar", "Pronunciation", "Filler Words")
-                    items(categories) { cat ->
-                        val isSelected = selectedCategory == cat
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (isSelected)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            modifier = Modifier
-                                .clickable { selectedCategory = cat }
-                                .testTag("cat_filter_$cat")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    LazyRow(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val categories = listOf("All", "Grammar", "Pronunciation", "Filler Words")
+                        items(categories) { cat ->
+                            val isSelected = selectedCategory == cat
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (isSelected)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                modifier = Modifier
+                                    .clickable { selectedCategory = cat }
+                                    .testTag("cat_filter_$cat")
+                            ) {
+                                Text(
+                                    text = cat,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+
+                    if (allWeaknesses.isNotEmpty()) {
+                        FilledTonalButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    repository.clearAllWeaknesses()
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.padding(start = 6.dp)
                         ) {
-                            Text(
-                                text = cat,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                            Icon(
+                                imageVector = Icons.Default.DeleteSweep,
+                                contentDescription = "Clear All Mistakes",
+                                modifier = Modifier.size(16.dp)
                             )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Clear All", fontSize = 11.sp)
                         }
                     }
                 }

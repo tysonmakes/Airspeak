@@ -52,6 +52,9 @@ interface WeaknessDao {
     @Query("DELETE FROM weakness_items WHERE id = :id")
     suspend fun deleteWeakness(id: Int)
 
+    @Query("DELETE FROM weakness_items")
+    suspend fun clearAllWeaknesses()
+
     @Query("SELECT COUNT(*) FROM weakness_items")
     suspend fun countWeaknesses(): Int
 }

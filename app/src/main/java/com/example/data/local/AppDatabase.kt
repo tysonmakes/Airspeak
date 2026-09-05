@@ -48,8 +48,8 @@ abstract class AppDatabase : RoomDatabase() {
                         super.onCreate(db)
                         CoroutineScope(Dispatchers.IO).launch {
                             val database = getInstance(context)
+                            // Populate essential vocabulary dictionary, but leave personal mistake bank clean for user
                             database.vocabularyDao().insertAll(DefaultData.initialWords)
-                            database.weaknessDao().insertWeaknesses(DefaultData.initialWeaknesses)
                         }
                     }
                 }).build()

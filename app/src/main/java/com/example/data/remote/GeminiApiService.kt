@@ -51,6 +51,13 @@ interface GeminiApi {
         @Query("key") apiKey: String,
         @Body request: GeminiRequest
     ): GeminiResponse
+
+    @POST("v1beta/models/{model}:generateContent")
+    suspend fun generateContentDynamic(
+        @retrofit2.http.Path("model") model: String,
+        @Query("key") apiKey: String,
+        @Body request: GeminiRequest
+    ): GeminiResponse
 }
 
 object GeminiClient {
@@ -61,9 +68,9 @@ object GeminiClient {
             level = HttpLoggingInterceptor.Level.BASIC
         }
         OkHttpClient.Builder()
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
             .addInterceptor(logging)
             .build()
     }
@@ -86,5 +93,45 @@ object GeminiClient {
     fun hasValidApiKey(): Boolean {
         val key = BuildConfig.GEMINI_API_KEY
         return !key.isNullOrBlank() && key != "MY_GEMINI_API_KEY" && key.length > 10
+    }
+
+    /**
+     * Fast direct query helper for low-latency conversational calling
+     */
+    suspend fun queryGeminiText(
+        prompt: String,
+        systemInstruction: String? = null,
+        model: String = "gemini-3.5-flash",
+        maxTokens: Int = 180,
+        temperature: Float = 0.7f
+    ): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (!hasValidApiKey()) return@withContext null
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        try {
+            val request = GeminiRequest(
+                contents = listOf(
+                    GeminiContent(
+                        role = "user",
+                        parts = listOf(GeminiPart(text = prompt))
+                    )
+                ),
+                systemInstruction = systemInstruction?.let {
+                    GeminiContent(parts = listOf(GeminiPart(text = it)))
+                },
+                generationConfig = GeminiGenerationConfig(
+                    temperature = temperature,
+                    maxOutputTokens = maxTokens
+                )
+            )
+            val response = try {
+                api.generateContentDynamic(model, apiKey, request)
+            } catch (e: Exception) {
+                api.generateContent(apiKey, request)
+            }
+            return@withContext response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
+        } catch (e: Exception) {
+            android.util.Log.w("GeminiClient", "Gemini query error: ${e.message}")
+            return@withContext null
+        }
     }
 }

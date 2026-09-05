@@ -755,7 +755,7 @@ object DailyChaptersCurriculum {
                         imageRes = ch.imageRes,
                         roleplayScenarioId = "scenario_daily_${ch.chapterNumber}",
                         targetSentence = ch.pronunciationSentence,
-                        defaultCompleted = ch.chapterNumber <= 3
+                        defaultCompleted = false
                     )
                 )
 
@@ -770,7 +770,7 @@ object DailyChaptersCurriculum {
                         subtitle = ch.vocabWord,
                         targetSentence = ch.vocabExample,
                         phoneticTip = ch.vocabDefinition,
-                        defaultCompleted = ch.chapterNumber <= 3
+                        defaultCompleted = false
                     )
                 )
 
@@ -785,7 +785,7 @@ object DailyChaptersCurriculum {
                         subtitle = "Native cadence & connected speech",
                         targetSentence = ch.pronunciationSentence,
                         phoneticTip = ch.pronunciationTip,
-                        defaultCompleted = ch.chapterNumber <= 3
+                        defaultCompleted = false
                     )
                 )
 
@@ -801,7 +801,7 @@ object DailyChaptersCurriculum {
                             subtitle = "Reciprocal questions & active cues",
                             targetSentence = ch.reviewKeyPhrase,
                             phoneticTip = "Try using this phrase during your next conversation.",
-                            defaultCompleted = ch.chapterNumber <= 3
+                            defaultCompleted = false
                         )
                     )
                 } else {
@@ -817,7 +817,7 @@ object DailyChaptersCurriculum {
                             grammarOptions = ch.grammarOptions,
                             correctOptionIndex = ch.correctGrammarIndex,
                             grammarExplanation = ch.grammarExplanation,
-                            defaultCompleted = ch.chapterNumber <= 3
+                            defaultCompleted = false
                         )
                     )
                 }

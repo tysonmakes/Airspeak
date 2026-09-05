@@ -33,7 +33,11 @@ class PollinationsApiService {
     /**
      * Send a prompt to Pollinations.ai (Primary), g4f GPT4Free (Backup), without any API key.
      */
-    suspend fun queryKeylessLlm(prompt: String, systemPrompt: String? = null): String? = withContext(Dispatchers.IO) {
+    suspend fun queryKeylessLlm(
+        prompt: String,
+        systemPrompt: String? = null,
+        modelName: String = "openai"
+    ): String? = withContext(Dispatchers.IO) {
         // 1. Primary: Pollinations.ai POST
         try {
             val messagesArray = JSONArray()
@@ -50,7 +54,7 @@ class PollinationsApiService {
 
             val payload = JSONObject().apply {
                 put("messages", messagesArray)
-                put("model", "openai")
+                put("model", modelName)
             }
 
             val request = Request.Builder()
@@ -78,7 +82,7 @@ class PollinationsApiService {
                 "UTF-8"
             )
             val getRequest = Request.Builder()
-                .url("https://text.pollinations.ai/$encodedPrompt?model=openai")
+                .url("https://text.pollinations.ai/$encodedPrompt?model=$modelName")
                 .header("User-Agent", "AirSpeak-Android/1.0")
                 .get()
                 .build()
@@ -354,7 +358,8 @@ class PollinationsApiService {
         tutorPersona: String,
         userSpokenText: String,
         callTopic: String,
-        conversationHistory: String
+        conversationHistory: String,
+        modelName: String = "openai"
     ): LiveCallCoachResponse? = withContext(Dispatchers.IO) {
         val systemPrompt = "You are $tutorName, an expert native English fluency coach on a live voice phone call. Personality: $tutorPersona. Topic: $callTopic. Return JSON ONLY."
         val prompt = """
@@ -377,7 +382,7 @@ class PollinationsApiService {
             }
         """.trimIndent()
 
-        val raw = queryKeylessLlm(prompt, systemPrompt) ?: return@withContext null
+        val raw = queryKeylessLlm(prompt, systemPrompt, modelName = modelName) ?: return@withContext null
         try {
             val cleanJson = raw.trim()
                 .removePrefix("```json")

@@ -145,9 +145,36 @@ fun LearnRoadmapScreen(
     var activeDialogStep by remember { mutableStateOf<RoadmapStep?>(null) }
     var activeGrammarStep by remember { mutableStateOf<RoadmapStep?>(null) }
     var activeRoleplayStep by remember { mutableStateOf<RoadmapStep?>(null) }
+    var activeFullChapterStep by remember { mutableStateOf<RoadmapStep?>(null) }
     var showAiGeneratorDialog by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
+
+    // Full Screen Chapter View (if user tapped a chapter for deep AI guided learning)
+    activeFullChapterStep?.let { chapterStep ->
+        ChapterFullViewScreen(
+            step = chapterStep,
+            repository = repository,
+            ttsHelper = ttsHelper,
+            speechHelper = speechHelper,
+            onBack = { activeFullChapterStep = null },
+            onChapterMastered = {
+                markStepCompleted(chapterStep.id)
+                activeFullChapterStep = null
+            },
+            onLaunchRoleplay = { scenarioId ->
+                activeFullChapterStep = null
+                onLaunchRoleplay(scenarioId)
+            }
+        )
+        return
+    }
+
+    // Dynamic streak based on completed chapters
+    val streakDays = remember(completedStepIds) {
+        val completedCount = completedStepIds.size
+        if (completedCount == 0) 0 else maxOf(1, completedCount / 3)
+    }
 
     Box(
         modifier = Modifier
@@ -157,7 +184,7 @@ fun LearnRoadmapScreen(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Top Bar matching Screenshot 1 & 2 ("Hey Suraj! [🔥 3]")
+            // Top Bar matching Screenshot 1 & 2 ("Hey Suraj! [🔥 Dynamic Streak]")
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -196,7 +223,7 @@ fun LearnRoadmapScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "3",
+                            text = "$streakDays",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Black,
                             color = Color.White
@@ -226,7 +253,8 @@ fun LearnRoadmapScreen(
                             onStepClick = {
                                 when (step.type) {
                                     RoadmapStepType.ROLEPLAY -> {
-                                        activeRoleplayStep = step
+                                        // Open comprehensive Full Chapter View with AI Teacher explanation & speech evaluation
+                                        activeFullChapterStep = step
                                     }
                                     RoadmapStepType.PRONUNCIATION,
                                     RoadmapStepType.ROLEPLAY_REVIEW,

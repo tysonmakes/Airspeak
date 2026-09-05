@@ -82,6 +82,26 @@ class EnglishLearningRepository(
 
     suspend fun deleteWeakness(id: Int) = weaknessDao.deleteWeakness(id)
 
+    suspend fun clearAllWeaknesses() = weaknessDao.clearAllWeaknesses()
+
+    suspend fun logWeakness(
+        originalMistake: String,
+        correctedForm: String,
+        category: String,
+        explanation: String
+    ) {
+        val item = WeaknessItem(
+            userSaid = originalMistake,
+            correction = correctedForm,
+            category = category,
+            explanation = explanation,
+            practiceCount = 0,
+            isMastered = false,
+            timestamp = System.currentTimeMillis()
+        )
+        weaknessDao.insertWeakness(item)
+    }
+
     // Speaking Sessions
     val allSessions: Flow<List<SpeakingSession>> = speakingDao.getAllSessions()
 

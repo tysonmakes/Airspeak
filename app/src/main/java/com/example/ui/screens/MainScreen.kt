@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
@@ -135,6 +136,12 @@ fun MainScreen() {
     var showInfoDialog by remember { mutableStateOf(false) }
     val hasGeminiKey = remember { GeminiClient.hasValidApiKey() }
 
+    val roadmapPrefs = remember { context.getSharedPreferences("airspeak_roadmap", Context.MODE_PRIVATE) }
+    val completedSteps = remember { roadmapPrefs.getStringSet("completed_steps", emptySet()) ?: emptySet() }
+    val dynamicStreak = remember(completedSteps) {
+        if (completedSteps.isEmpty()) 0 else maxOf(1, completedSteps.size / 3)
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -166,7 +173,7 @@ fun MainScreen() {
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "CEFR B2 • Active",
+                                    text = if (dynamicStreak == 0) "Beginner • Day 1" else "Streak • ${dynamicStreak}d",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = EmeraldSuccess
@@ -196,7 +203,7 @@ fun MainScreen() {
                             )
                             Spacer(modifier = Modifier.width(2.dp))
                             Text(
-                                text = "5d",
+                                text = "${dynamicStreak}d",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
                                 color = AmberTertiary
@@ -398,6 +405,8 @@ fun MainScreen() {
 
     if (overlayScreen == AppOverlay.StreakStats) {
         StreakStatsDialog(
+            currentStreak = dynamicStreak,
+            completedStepsCount = completedSteps.size,
             onDismiss = { overlayScreen = null },
             onOpenVocab = { overlayScreen = AppOverlay.Vocabulary },
             onOpenRoleplay = { overlayScreen = AppOverlay.Roleplay() }
@@ -407,6 +416,8 @@ fun MainScreen() {
 
 @Composable
 fun StreakStatsDialog(
+    currentStreak: Int,
+    completedStepsCount: Int,
     onDismiss: () -> Unit,
     onOpenVocab: () -> Unit,
     onOpenRoleplay: () -> Unit
@@ -423,7 +434,7 @@ fun StreakStatsDialog(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "5-Day Learning Streak",
+                    text = if (currentStreak == 0) "Start Your Daily Streak" else "$currentStreak-Day Learning Streak",
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleLarge
                 )
@@ -432,7 +443,10 @@ fun StreakStatsDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
-                    text = "Consistent daily speaking builds fluency 3x faster. Keep up the momentum!",
+                    text = if (currentStreak == 0)
+                        "Complete your first chapter in the Learn tab to ignite your daily fluency streak!"
+                    else
+                        "Consistent daily speaking builds fluency 3x faster. Keep up the momentum!",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -450,9 +464,10 @@ fun StreakStatsDialog(
                         horizontalArrangement = Arrangement.SpaceAround
                     ) {
                         val days = listOf("M", "T", "W", "T", "F", "S", "S")
+                        val activeDaysCount = minOf(7, currentStreak)
                         days.forEachIndexed { idx, day ->
-                            val isCompleted = idx < 5
-                            val isToday = idx == 4
+                            val isCompleted = idx < activeDaysCount
+                            val isToday = idx == (activeDaysCount.coerceAtLeast(1) - 1)
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -496,7 +511,7 @@ fun StreakStatsDialog(
                 // Daily targets
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Today's Target",
+                        text = "Current Progress",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -506,30 +521,15 @@ fun StreakStatsDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Speaking Practice", style = MaterialTheme.typography.bodySmall)
-                            Text("12 / 15 min", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            Text("Curriculum Chapters Completed", style = MaterialTheme.typography.bodySmall)
+                            Text("$completedStepsCount completed", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
+                        val progressFraction = (completedStepsCount % 10) / 10f
                         LinearProgressIndicator(
-                            progress = { 0.80f },
+                            progress = { progressFraction.coerceIn(0f, 1f) },
                             modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                             color = EmeraldSuccess
-                        )
-                    }
-
-                    Column {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Vocabulary Mastered", style = MaterialTheme.typography.bodySmall)
-                            Text("8 / 10 words", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        LinearProgressIndicator(
-                            progress = { 0.80f },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }

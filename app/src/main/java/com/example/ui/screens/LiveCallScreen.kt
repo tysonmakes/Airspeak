@@ -104,8 +104,11 @@ import com.example.data.local.LiveCallTranscriptItem
 import com.example.data.local.LiveCallTutor
 import com.example.data.local.TutorCatalog
 import com.example.data.local.entity.WeaknessItem
+import com.example.data.remote.AiEngine
+import com.example.data.remote.AiEngineManager
 import com.example.data.remote.PollinationsApiService
 import com.example.data.repository.EnglishLearningRepository
+import com.example.ui.components.AiEngineSelectionDialog
 import com.example.ui.theme.AmberTertiary
 import com.example.ui.theme.CyanSecondary
 import com.example.ui.theme.EmeraldSuccess
@@ -132,6 +135,11 @@ fun LiveCallScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val pollinations = remember { PollinationsApiService() }
+    val aiEngineManager = remember { AiEngineManager(context) }
+    val currentEngine by aiEngineManager.currentEngine.collectAsState()
+    var showEngineSelectorDialog by remember { mutableStateOf(false) }
+    var lastTurnLatencyMs by remember { mutableLongStateOf(0L) }
+    var lastFallbackNotice by remember { mutableStateOf<String?>(null) }
 
     var selectedTutor by remember { mutableStateOf(TutorCatalog.tutors.first()) }
     var selectedTopic by remember { mutableStateOf(selectedTutor.defaultTopics.first()) }
@@ -199,19 +207,24 @@ fun LiveCallScreen(
                 "${it.sender.name}: ${it.text}"
             }
 
-            val result = pollinations.generateLiveCallTurnKeyless(
+            val turnResult = aiEngineManager.generateLiveCallTurn(
                 tutorName = selectedTutor.name,
                 tutorPersona = selectedTutor.bio,
                 userSpokenText = clean,
                 callTopic = selectedTopic,
-                conversationHistory = history
+                conversationHistory = history,
+                targetEngine = currentEngine
             )
 
             isAiThinking = false
+            lastTurnLatencyMs = turnResult.latencyMs
+            if (turnResult.wasFallback && turnResult.fallbackReason != null) {
+                lastFallbackNotice = turnResult.fallbackReason
+            }
 
-            val spokenReply = result?.spokenReply ?: getFallbackResponse(selectedTutor, clean)
-            val correction = result?.liveCorrection
-            val praise = result?.livePraise
+            val spokenReply = turnResult.spokenReply
+            val correction = turnResult.liveCorrection
+            val praise = turnResult.livePraise
 
             if (!correction.isNullOrBlank()) {
                 val corrItem = LiveCallCorrectionItem(
@@ -246,9 +259,9 @@ fun LiveCallScreen(
             )
             ttsHelper.speak(spokenReply, utteranceId = "live_call_reply") {
                 isAiSpeaking = false
-                // Auto-listen if not muted
+                // Auto-listen if not muted with fast 800ms silence threshold
                 if (callState == CallState.ACTIVE && !isMuted) {
-                    speechHelper.startListening { nextSpeech ->
+                    speechHelper.startListening(silenceTimeoutMs = 800L) { nextSpeech ->
                         processUserTurn(nextSpeech)
                     }
                 }
@@ -265,9 +278,11 @@ fun LiveCallScreen(
         activeCorrection = null
         activeCoachTip = null
         latestPraise = null
+        lastFallbackNotice = null
+        lastTurnLatencyMs = 0L
 
         coroutineScope.launch {
-            delay(1600) // Realistic ringing / connection hand-shake
+            delay(1200) // Realistic ringing / connection hand-shake
             callState = CallState.ACTIVE
 
             // Tutor delivers greeting
@@ -288,7 +303,7 @@ fun LiveCallScreen(
             ttsHelper.speak(greeting, utteranceId = "live_call_greeting") {
                 isAiSpeaking = false
                 if (!isMuted) {
-                    speechHelper.startListening { spoken ->
+                    speechHelper.startListening(silenceTimeoutMs = 800L) { spoken ->
                         processUserTurn(spoken)
                     }
                 }
