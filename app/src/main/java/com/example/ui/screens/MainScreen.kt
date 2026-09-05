@@ -18,12 +18,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.RecordVoiceOver
@@ -64,6 +69,7 @@ import com.example.audio.TextToSpeechHelper
 import com.example.data.local.AppDatabase
 import com.example.data.remote.GeminiClient
 import com.example.data.repository.EnglishLearningRepository
+import com.example.ui.theme.AmberTertiary
 import com.example.ui.theme.EmeraldSuccess
 
 sealed class NavigationTab(
@@ -72,10 +78,11 @@ sealed class NavigationTab(
     val unselectedIcon: ImageVector,
     val testTag: String
 ) {
+    data object Learn : NavigationTab("Learn", Icons.Filled.Explore, Icons.Outlined.Explore, "nav_learn")
+    data object Practice : NavigationTab("Practice", Icons.Filled.Forum, Icons.Outlined.Forum, "nav_practice")
+    data object Call : NavigationTab("Call", Icons.Filled.Call, Icons.Outlined.Call, "nav_call")
     data object Speaking : NavigationTab("Speaking", Icons.Filled.Mic, Icons.Outlined.Mic, "nav_speaking")
-    data object Roleplay : NavigationTab("Roleplay", Icons.Filled.Forum, Icons.Outlined.Forum, "nav_roleplay")
-    data object Vocab : NavigationTab("Vocabulary", Icons.Filled.School, Icons.Outlined.School, "nav_vocab")
-    data object Weakness : NavigationTab("Mistake Bank", Icons.Filled.RecordVoiceOver, Icons.Outlined.RecordVoiceOver, "nav_weakness")
+    data object Mistakes : NavigationTab("Mistakes", Icons.Filled.RecordVoiceOver, Icons.Outlined.RecordVoiceOver, "nav_mistakes")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,10 +104,11 @@ fun MainScreen() {
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf(
+        NavigationTab.Learn,
+        NavigationTab.Practice,
+        NavigationTab.Call,
         NavigationTab.Speaking,
-        NavigationTab.Roleplay,
-        NavigationTab.Vocab,
-        NavigationTab.Weakness
+        NavigationTab.Mistakes
     )
 
     var showInfoDialog by remember { mutableStateOf(false) }
@@ -123,7 +131,7 @@ fun MainScreen() {
                         Spacer(modifier = Modifier.width(8.dp))
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = if (hasGeminiKey) EmeraldSuccess.copy(alpha = 0.15f) else MaterialTheme.colorScheme.primaryContainer
+                            color = EmeraldSuccess.copy(alpha = 0.15f)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -133,16 +141,42 @@ fun MainScreen() {
                                     modifier = Modifier
                                         .size(6.dp)
                                         .clip(CircleShape)
-                                        .background(if (hasGeminiKey) EmeraldSuccess else MaterialTheme.colorScheme.primary)
+                                        .background(EmeraldSuccess)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = if (hasGeminiKey) "Gemini Flash" else "Smart Coach",
+                                    text = "CEFR B2 • Active",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (hasGeminiKey) EmeraldSuccess else MaterialTheme.colorScheme.primary
+                                    color = EmeraldSuccess
                                 )
                             }
+                        }
+                    }
+                },
+                navigationIcon = {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = AmberTertiary.copy(alpha = 0.15f),
+                        modifier = Modifier.padding(start = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LocalFireDepartment,
+                                contentDescription = "Daily streak",
+                                tint = AmberTertiary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "5d",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = AmberTertiary
+                            )
                         }
                     }
                 },
@@ -175,6 +209,7 @@ fun MainScreen() {
                         onClick = {
                             selectedTabIndex = index
                             ttsHelper.stop()
+                            speechHelper.stopListening()
                         },
                         icon = {
                             Icon(
@@ -185,7 +220,7 @@ fun MainScreen() {
                         label = {
                             Text(
                                 text = tab.title,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             )
                         },
@@ -203,22 +238,30 @@ fun MainScreen() {
             label = "tab_crossfade"
         ) { tabIndex ->
             when (tabIndex) {
-                0 -> SpeakingScreen(
+                0 -> LearnRoadmapScreen(
                     repository = repository,
                     ttsHelper = ttsHelper,
                     speechHelper = speechHelper,
-                    onNavigateToWeaknessLog = { selectedTabIndex = 3 }
+                    onLaunchRoleplay = { _ -> selectedTabIndex = 1 }
                 )
-                1 -> RoleplayScreen(
+                1 -> TopicChatPracticeScreen(
                     repository = repository,
                     ttsHelper = ttsHelper,
                     speechHelper = speechHelper
                 )
-                2 -> VocabularyScreen(
+                2 -> LiveCallScreen(
                     repository = repository,
-                    ttsHelper = ttsHelper
+                    ttsHelper = ttsHelper,
+                    speechHelper = speechHelper,
+                    onNavigateToWeaknessLog = { selectedTabIndex = 4 }
                 )
-                3 -> WeaknessLogScreen(
+                3 -> SpeakingScreen(
+                    repository = repository,
+                    ttsHelper = ttsHelper,
+                    speechHelper = speechHelper,
+                    onNavigateToWeaknessLog = { selectedTabIndex = 4 }
+                )
+                4 -> WeaknessLogScreen(
                     repository = repository,
                     ttsHelper = ttsHelper
                 )

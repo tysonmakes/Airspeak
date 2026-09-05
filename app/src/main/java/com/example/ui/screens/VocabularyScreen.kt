@@ -35,6 +35,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -96,6 +97,8 @@ fun VocabularyScreen(
     }
 
     var flashcardIndex by remember { mutableIntStateOf(0) }
+    var isGeneratingWords by remember { mutableStateOf(false) }
+    var generationMessage by remember { mutableStateOf<String?>(null) }
     val currentFlashcardWord = if (filteredWords.isNotEmpty()) {
         filteredWords[flashcardIndex % filteredWords.size]
     } else null
@@ -133,7 +136,7 @@ fun VocabularyScreen(
                                 color = MaterialTheme.colorScheme.secondaryContainer
                             ) {
                                 Text(
-                                    text = "AIRLEARN VOCAB ENGINE",
+                                    text = "ZERO-AUTH VOCAB ENGINE",
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
@@ -142,7 +145,7 @@ fun VocabularyScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Spaced Repetition (SRS)",
+                                text = "Keyless AI & Local SQLite SRS",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -305,6 +308,59 @@ fun VocabularyScreen(
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Text("Next Card")
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Dynamic 5-Word Generator (Keyless AI)
+                        FilledTonalButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isGeneratingWords = true
+                                    generationMessage = null
+                                    val targetLevel = if (selectedLevel == "All") "Intermediate" else selectedLevel
+                                    val added = repository.fetchAndSaveDynamicVocabulary(targetLevel)
+                                    isGeneratingWords = false
+                                    generationMessage = if (added > 0) {
+                                        "Saved $added dynamic $targetLevel words locally in Room SQLite!"
+                                    } else {
+                                        "Loaded today's 5 core vocabulary words into local database."
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("generate_dynamic_words_button"),
+                            shape = RoundedCornerShape(12.dp),
+                            enabled = !isGeneratingWords
+                        ) {
+                            if (isGeneratingWords) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Generating with Keyless AI...")
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Generate 5 New Words (Keyless AI)")
+                            }
+                        }
+
+                        generationMessage?.let { msg ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = EmeraldSuccess.copy(alpha = 0.12f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = msg,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = EmeraldSuccess,
+                                    fontWeight = FontWeight.Medium,
+                                    textAlign = TextAlign.Center
+                                )
                             }
                         }
                     }

@@ -119,7 +119,7 @@ fun WeaknessLogScreen(
                                 color = MaterialTheme.colorScheme.tertiaryContainer
                             ) {
                                 Text(
-                                    text = "CORRECTION BANK",
+                                    text = "ZERO-AUTH • LOCAL SQLITE",
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
@@ -132,6 +132,11 @@ fun WeaknessLogScreen(
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Saved locally on device with zero external backend or sign-up.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 

@@ -110,6 +110,15 @@ class EnglishLearningRepository(
     fun generateDrills(weaknesses: List<WeaknessItem>): List<TargetedDrill> {
         return aiService.generateTargetedDrills(weaknesses)
     }
+
+    suspend fun fetchAndSaveDynamicVocabulary(level: String): Int {
+        val words = aiService.generateDynamicVocabulary(level)
+        if (words.isNotEmpty()) {
+            vocabDao.insertAll(words)
+            return words.size
+        }
+        return 0
+    }
 }
 
 enum class SrsRating {

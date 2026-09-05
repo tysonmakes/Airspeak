@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.BuildConfig
 import com.example.data.local.RoleplayScenario
 import com.example.data.local.entity.RoleplayMessage
+import com.example.data.local.entity.VocabularyWord
 import com.example.data.local.entity.WeaknessItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,6 +14,12 @@ import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+
+data class WordChoiceSuggestion(
+    val originalWord: String,
+    val suggestedAlternative: String,
+    val explanation: String
+)
 
 data class EvaluationResult(
     val overallScore: Int,
@@ -24,6 +31,7 @@ data class EvaluationResult(
     val paceRating: String,
     val fillerWords: List<FillerWordOccurrence>,
     val grammarCorrections: List<GrammarCorrection>,
+    val betterWordChoices: List<WordChoiceSuggestion> = emptyList(),
     val pronunciationTips: List<PronunciationTip>,
     val positivePraise: String,
     val executiveSummary: String
@@ -66,6 +74,8 @@ data class TargetedDrill(
 
 class AiEvaluationService {
 
+    private val pollinations = PollinationsApiService()
+
     suspend fun evaluateSpeech(
         topic: String,
         transcript: String,
@@ -76,6 +86,70 @@ class AiEvaluationService {
         val wordCount = cleanTranscript.split(Regex("\\s+")).filter { it.isNotBlank() }.size
         val computedWpm = ((wordCount.toFloat() / duration) * 60).roundToInt()
 
+        // 1. First priority: Zero-auth, Keyless Pollinations.ai LLM endpoint
+        try {
+            val keylessResult = pollinations.evaluateSpeechKeyless(cleanTranscript, topic, computedWpm)
+            if (keylessResult != null) {
+                val fillerTargets = listOf("um", "uh", "like", "you know", "actually", "basically", "sort of", "kind of", "i mean", "so")
+                val detectedFillers = mutableListOf<FillerWordOccurrence>()
+                val lower = cleanTranscript.lowercase(Locale.ENGLISH)
+                for (target in fillerTargets) {
+                    val count = Regex("\\b$target\\b", RegexOption.IGNORE_CASE).findAll(lower).count()
+                    if (count > 0) detectedFillers.add(FillerWordOccurrence(target, count))
+                }
+
+                val paceRating = when {
+                    computedWpm in 120..155 -> "Optimal & Natural (120-155 WPM)"
+                    computedWpm < 100 -> "Hesitant & Deliberate (<100 WPM)"
+                    computedWpm in 100..119 -> "Moderate Rhythm (100-119 WPM)"
+                    else -> "Fast & Energetic (>155 WPM)"
+                }
+
+                val grammarCorrections = keylessResult.correctedGrammar.map {
+                    GrammarCorrection(
+                        originalPhrase = it.original,
+                        correctedPhrase = it.correction,
+                        errorCategory = it.category,
+                        ruleExplanation = it.explanation
+                    )
+                }
+
+                val wordChoices = keylessResult.betterWordChoices.map {
+                    WordChoiceSuggestion(
+                        originalWord = it.original,
+                        suggestedAlternative = it.suggested,
+                        explanation = it.explanation
+                    )
+                }
+
+                return@withContext EvaluationResult(
+                    overallScore = keylessResult.overallScore,
+                    fluencyScore = min(98, max(50, keylessResult.overallScore - (detectedFillers.size * 2))),
+                    grammarScore = if (grammarCorrections.isEmpty()) 92 else max(55, 88 - (grammarCorrections.size * 6)),
+                    vocabScore = if (wordChoices.isNotEmpty()) 85 else 78,
+                    pronunciationScore = 84,
+                    wordsPerMinute = computedWpm,
+                    paceRating = paceRating,
+                    fillerWords = detectedFillers,
+                    grammarCorrections = grammarCorrections,
+                    betterWordChoices = wordChoices,
+                    pronunciationTips = listOf(
+                        PronunciationTip(
+                            word = "Connected Speech",
+                            ipaPhonetic = "/kəˌnek.tɪd ˈspiːtʃ/",
+                            stressNote = "Rhythm & Cadence",
+                            audioTip = "Link consonant endings to vowel beginnings for fluid sentence transitions."
+                        )
+                    ),
+                    positivePraise = keylessResult.positivePraise,
+                    executiveSummary = keylessResult.briefExplanation
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("AiEvaluationService", "Pollinations keyless speech evaluation exception: ${e.message}")
+        }
+
+        // 2. Secondary check: Optional Gemini if key is provided
         if (GeminiClient.hasValidApiKey()) {
             try {
                 val apiKey = BuildConfig.GEMINI_API_KEY
@@ -142,7 +216,7 @@ class AiEvaluationService {
             }
         }
 
-        // High-fidelity fallback heuristic evaluator
+        // 3. High-fidelity offline fallback heuristic evaluator (100% reliable, zero network required)
         return@withContext runLocalEvaluation(cleanTranscript, duration, computedWpm, topic)
     }
 
@@ -361,6 +435,37 @@ class AiEvaluationService {
             )
         }
 
+        val vocabularyEnhancers = listOf(
+            Pair("good", Pair("exceptional / compelling", "Replaces generic 'good' with more impactful adjectives.")),
+            Pair("very", Pair("substantially / remarkably", "Replaces overused intensifier 'very' with sophisticated adverbs.")),
+            Pair("bad", Pair("sub-optimal / unfavorable", "Uses more professional executive vocabulary.")),
+            Pair("big", Pair("substantial / prominent", "Adds descriptive weight and clarity.")),
+            Pair("think", Pair("believe / postulate", "Elevates conversational tone to formal presentation register.")),
+            Pair("help", Pair("facilitate / assist", "More native phrasing for professional environments.")),
+            Pair("show", Pair("demonstrate / illustrate", "Stronger verb that commands attention."))
+        )
+        val detectedWordChoices = mutableListOf<WordChoiceSuggestion>()
+        for ((target, data) in vocabularyEnhancers) {
+            if (Regex("\\b$target\\b", RegexOption.IGNORE_CASE).containsMatchIn(transcript)) {
+                detectedWordChoices.add(
+                    WordChoiceSuggestion(
+                        originalWord = target,
+                        suggestedAlternative = data.first,
+                        explanation = data.second
+                    )
+                )
+            }
+        }
+        if (detectedWordChoices.isEmpty()) {
+            detectedWordChoices.add(
+                WordChoiceSuggestion(
+                    originalWord = "general phrasing",
+                    suggestedAlternative = "nuanced collocations (e.g. 'dive into', 'bring to light')",
+                    explanation = "Using natural collocations helps your speaking sound native and effortless."
+                )
+            )
+        }
+
         // 4. Compute realistic scores
         val paceRating = when {
             computedWpm in 120..155 -> "Optimal & Natural (120-155 WPM)"
@@ -392,6 +497,7 @@ class AiEvaluationService {
             paceRating = paceRating,
             fillerWords = detectedFillers,
             grammarCorrections = corrections,
+            betterWordChoices = detectedWordChoices,
             pronunciationTips = pronTips,
             positivePraise = "Strong effort! Your communicative intent was articulate and you maintained speaking momentum on '$topic'.",
             executiveSummary = "Practice breathing pauses to eliminate '${detectedFillers.firstOrNull()?.word ?: "filler words"}' and refine past/present verb consistency."
@@ -404,7 +510,29 @@ class AiEvaluationService {
         userMessage: String
     ): RoleplayTurnResult = withContext(Dispatchers.IO) {
         val cleanMsg = userMessage.trim()
+        val historyString = conversationHistory.takeLast(6).joinToString("\n") {
+            "${it.sender.uppercase()}: ${it.message}"
+        }
 
+        // 1. First priority: Zero-auth, Keyless Pollinations.ai LLM endpoint
+        try {
+            val keylessRoleplay = pollinations.generateRoleplayDialogueKeyless(
+                scenario.roleName, scenario.title, cleanMsg, historyString
+            )
+            if (keylessRoleplay != null && keylessRoleplay.reply.isNotBlank()) {
+                return@withContext RoleplayTurnResult(
+                    aiResponse = keylessRoleplay.reply,
+                    coachingFeedback = keylessRoleplay.coachingTip,
+                    grammarCorrection = keylessRoleplay.correction?.let {
+                        GrammarCorrection(it.original, it.correction, it.category, it.explanation)
+                    }
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("AiEvaluationService", "Pollinations roleplay exception: ${e.message}")
+        }
+
+        // 2. Secondary check: Optional Gemini if key is provided
         if (GeminiClient.hasValidApiKey()) {
             try {
                 val apiKey = BuildConfig.GEMINI_API_KEY
@@ -624,5 +752,34 @@ class AiEvaluationService {
         }
 
         return drills
+    }
+
+    /**
+     * Generate dynamic daily vocabulary sets keylessly via Pollinations.ai, with local fallback
+     */
+    suspend fun generateDynamicVocabulary(level: String): List<VocabularyWord> = withContext(Dispatchers.IO) {
+        try {
+            val keylessWords = pollinations.generateDynamicVocabularyKeyless(level, 5)
+            if (!keylessWords.isNullOrEmpty()) {
+                return@withContext keylessWords.map { kw ->
+                    VocabularyWord(
+                        word = kw.word,
+                        partOfSpeech = kw.partOfSpeech,
+                        phonetic = kw.phonetic,
+                        definition = kw.definition,
+                        exampleSentence = kw.exampleSentence,
+                        synonyms = kw.synonyms,
+                        antonyms = kw.antonyms,
+                        level = level,
+                        masteryLevel = 0,
+                        intervalDays = 1,
+                        nextReviewTimestamp = System.currentTimeMillis()
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("AiEvaluationService", "Dynamic vocabulary generation error: ${e.message}")
+        }
+        return@withContext emptyList()
     }
 }

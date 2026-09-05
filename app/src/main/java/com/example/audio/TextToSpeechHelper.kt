@@ -17,6 +17,8 @@ class TextToSpeechHelper(context: Context) {
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
+    private val completionCallbacks = mutableMapOf<String, () -> Unit>()
+
     init {
         tts = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -32,10 +34,16 @@ class TextToSpeechHelper(context: Context) {
 
                     override fun onDone(utteranceId: String?) {
                         _isSpeaking.value = false
+                        utteranceId?.let { id ->
+                            completionCallbacks.remove(id)?.invoke()
+                        }
                     }
 
                     override fun onError(utteranceId: String?) {
                         _isSpeaking.value = false
+                        utteranceId?.let { id ->
+                            completionCallbacks.remove(id)
+                        }
                     }
                 })
             } else {
@@ -44,14 +52,32 @@ class TextToSpeechHelper(context: Context) {
         }
     }
 
-    fun speak(text: String, utteranceId: String = "airspeak_tts") {
+    fun setVoiceProfile(locale: Locale = Locale.US, speechRate: Float = 0.95f, pitch: Float = 1.0f) {
         if (!isInitialized || tts == null) return
+        try {
+            tts?.language = locale
+            tts?.setSpeechRate(speechRate)
+            tts?.setPitch(pitch)
+        } catch (e: Exception) {
+            Log.w("TextToSpeechHelper", "Failed setting voice profile", e)
+        }
+    }
+
+    fun speak(text: String, utteranceId: String = "airspeak_tts", onDone: (() -> Unit)? = null) {
+        if (!isInitialized || tts == null) {
+            onDone?.invoke()
+            return
+        }
         stop()
+        if (onDone != null) {
+            completionCallbacks[utteranceId] = onDone
+        }
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
 
     fun stop() {
         if (isInitialized && tts != null) {
+            completionCallbacks.clear()
             tts?.stop()
             _isSpeaking.value = false
         }
