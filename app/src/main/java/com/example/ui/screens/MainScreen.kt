@@ -83,10 +83,14 @@ import com.example.data.repository.EnglishLearningRepository
 import com.example.ui.theme.AmberTertiary
 import com.example.ui.theme.EmeraldSuccess
 
+import androidx.compose.material.icons.filled.Settings
+import com.example.data.remote.AiEngineManager
+
 sealed interface AppOverlay {
     data class Roleplay(val scenarioId: String? = null) : AppOverlay
     data object Vocabulary : AppOverlay
     data object StreakStats : AppOverlay
+    data object Settings : AppOverlay
 }
 
 sealed class NavigationTab(
@@ -111,6 +115,7 @@ fun MainScreen() {
     val repository = remember { EnglishLearningRepository(database) }
     val ttsHelper = remember { TextToSpeechHelper(context) }
     val speechHelper = remember { SpeechRecognitionHelper(context) }
+    val aiEngineManager = remember { AiEngineManager(context) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -227,6 +232,20 @@ fun MainScreen() {
                         )
                     }
                     IconButton(
+                        onClick = {
+                            ttsHelper.stop()
+                            speechHelper.stopListening()
+                            overlayScreen = AppOverlay.Settings
+                        },
+                        modifier = Modifier.testTag("top_settings_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings & AI Selector",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
                         onClick = { showInfoDialog = true },
                         modifier = Modifier.testTag("app_info_button")
                     ) {
@@ -297,6 +316,14 @@ fun MainScreen() {
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
+                    onBack = { overlayScreen = null }
+                )
+            }
+            is AppOverlay.Settings -> {
+                SettingsScreen(
+                    aiEngineManager = aiEngineManager,
+                    repository = repository,
+                    ttsHelper = ttsHelper,
                     onBack = { overlayScreen = null }
                 )
             }

@@ -17,7 +17,9 @@ data class ChapterDailyTopic(
     val correctGrammarIndex: Int,
     val grammarExplanation: String,
     val roleplayPrompt: String,
-    val reviewKeyPhrase: String
+    val reviewKeyPhrase: String,
+    val hindiTranslation: String = "",
+    val tutorName: String = "Alex"
 )
 
 object DailyChaptersCurriculum {
@@ -58,8 +60,10 @@ object DailyChaptersCurriculum {
             vocabWord = "Artisan / Decaf",
             vocabDefinition = "Crafted with high quality / Coffee with caffeine extracted",
             vocabExample = "Could I get a medium decaf latte with oat milk, please?",
-            pronunciationSentence = "I'd like an iced Americano with an extra shot of espresso.",
-            pronunciationTip = "Pronounce 'espresso' with an 's' sound, not 'expresso'.",
+            pronunciationSentence = "Could I get a medium decaf latte with oat milk, please?",
+            hindiTranslation = "Kya mujhe oat milk ke sath medium decaf latte mil sakti hai, please?",
+            tutorName = "Alex",
+            pronunciationTip = "Pronounce 'decaf latte' smoothly with light liaison.",
             grammarQuestion = "Which is the most polite natural way to order?",
             grammarOptions = listOf(
                 "Could I please get a large cappuccino to go?",
@@ -75,14 +79,16 @@ object DailyChaptersCurriculum {
         // CHAPTER 2
         ChapterDailyTopic(
             chapterNumber = 2,
-            title = "Making a New Friend",
-            subtitle = "Starting casual conversations at community workshops",
+            title = "Making a new friend",
+            subtitle = "Starting casual conversations & friendly introductions",
             imageRes = R.drawable.img_chapter_making_friends_1788579459754,
             vocabWord = "Common Ground",
             vocabDefinition = "Shared interests or beliefs between two people",
             vocabExample = "We quickly found common ground talking about indie music.",
-            pronunciationSentence = "Pleased to meet you! How long have you been living around here?",
-            pronunciationTip = "Blend 'pleased to' naturally as /pliːz.tuː/ without an abrupt pause.",
+            pronunciationSentence = "Hi Leo! My name is Alex. Nice to meet you.",
+            hindiTranslation = "Hi Leo! Mera naam Alex hai. Tumse milkar khushi hui.",
+            tutorName = "Alex",
+            pronunciationTip = "Blend 'Nice to meet you' naturally without robotic pauses.",
             grammarQuestion = "Choose the correct question form for meeting someone:",
             grammarOptions = listOf(
                 "What brings you to this event today?",
@@ -92,7 +98,7 @@ object DailyChaptersCurriculum {
             correctGrammarIndex = 0,
             grammarExplanation = "'What brings you to...' is the standard native idiom for asking someone why they attended.",
             roleplayPrompt = "Break the ice with someone sitting beside you at an interactive workshop.",
-            reviewKeyPhrase = "That's fascinating! How did you get started with that?"
+            reviewKeyPhrase = "Hi Leo! My name is Alex. Nice to meet you."
         ),
 
         // CHAPTER 3

@@ -7,7 +7,14 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,21 +37,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RecordVoiceOver
-import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -54,19 +61,22 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,8 +85,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -91,7 +106,8 @@ import com.example.audio.TextToSpeechHelper
 import com.example.data.local.ChapterDailyTopic
 import com.example.data.local.DailyChaptersCurriculum
 import com.example.data.local.RoadmapStep
-import com.example.data.local.entity.WeaknessItem
+import com.example.data.remote.AiEngine
+import com.example.data.remote.AiEngineManager
 import com.example.data.repository.EnglishLearningRepository
 import com.example.ui.theme.AmberTertiary
 import com.example.ui.theme.EmeraldSuccess
@@ -100,15 +116,21 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-/**
- * Full Immersive Screen for a Learning Chapter.
- * Features:
- * 1. AI Teacher persona speaking naturally at a friendly, normal human pace (Hindi/Hinglish friendly explanation).
- * 2. Explains clearly what today's lesson is about, where it is used in real life.
- * 3. Guided sentence practice with real speech recognition accuracy & word-by-word pronunciation correction.
- * 4. Automatic error logging to the user's personal Weakness Log when mistakes happen.
- * 5. App decides completion: Unlock only occurs when the user successfully practices and achieves passing score.
- */
+enum class ChapterMode {
+    LISTEN,    // Screenshot 1: Tutor Portrait with peach/bronze dual-tone ring, floating player dock, 5s rewind/forward, translation overlay
+    PRACTICE   // Screenshot 2: Glowing cyan tutor ring, downward arrow, practice card with book, speaker, bookmark, bold sentence & Hindi translation, giant mic with halo
+}
+
+data class ChapterEvaluationReport(
+    val overallScore: Int,
+    val fluencyScore: Int,
+    val fillerCount: Int,
+    val wpm: Int,
+    val structureScore: Int,
+    val missingWords: List<String>,
+    val feedback: String
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChapterFullViewScreen(
@@ -122,8 +144,9 @@ fun ChapterFullViewScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val aiEngineManager = remember { AiEngineManager(context) }
 
-    // Find the full chapter details from the curriculum
+    // Resolve chapter details from the 100-chapter curriculum
     val chapter: ChapterDailyTopic = remember(step.stepNumber) {
         DailyChaptersCurriculum.chapters100.find { it.chapterNumber == step.stepNumber }
             ?: ChapterDailyTopic(
@@ -131,25 +154,26 @@ fun ChapterFullViewScreen(
                 title = step.title,
                 subtitle = step.subtitle,
                 imageRes = step.imageRes ?: DailyChaptersCurriculum.getImageForChapter(step.stepNumber),
-                vocabWord = "Essential Expression",
-                vocabDefinition = "Key practical phrase used in daily conversations",
-                vocabExample = step.targetSentence,
-                pronunciationSentence = step.targetSentence,
-                pronunciationTip = step.phoneticTip.ifBlank { "Speak smoothly and clearly with natural pauses." },
-                grammarQuestion = "Which sentence sounds most polite and natural?",
-                grammarOptions = listOf(
-                    step.targetSentence,
-                    "I want this immediately now.",
-                    "Me going for saying this."
-                ),
+                vocabWord = "Common Ground",
+                vocabDefinition = "Shared interests or beliefs between people",
+                vocabExample = "We found common ground talking about favorite movies.",
+                pronunciationSentence = step.targetSentence.ifBlank { "Hi Leo! My name is Alex. Nice to meet you." },
+                pronunciationTip = step.phoneticTip.ifBlank { "Blend 'Nice to meet you' naturally." },
+                grammarQuestion = "Choose the correct polite greeting:",
+                grammarOptions = listOf(step.targetSentence, "Me greeting you now.", "You want speaking me?"),
                 correctGrammarIndex = 0,
-                grammarExplanation = "Polite phrasing with modal verbs is standard in everyday English.",
-                roleplayPrompt = "Practice this real-life scenario with confidence.",
-                reviewKeyPhrase = step.targetSentence
+                grammarExplanation = "Polite greeting idioms are essential in friendly introductions.",
+                roleplayPrompt = "Introduce yourself politely to someone new.",
+                reviewKeyPhrase = step.targetSentence,
+                hindiTranslation = "Hi Leo! Mera naam Alex hai. Tumse milkar khushi hui.",
+                tutorName = "Alex"
             )
     }
 
-    // AI Teacher speech states
+    // Active mode: LISTEN (Screenshot 1) vs PRACTICE (Screenshot 2)
+    var currentMode by remember { mutableStateOf(ChapterMode.LISTEN) }
+
+    // TTS & Speech state
     val isSpeaking by ttsHelper.isSpeaking.collectAsState()
     val isListening by speechHelper.isListening.collectAsState()
     val spokenPartial by speechHelper.currentText.collectAsState()
@@ -157,13 +181,26 @@ fun ChapterFullViewScreen(
     var spokenText by remember { mutableStateOf("") }
     var evaluationScore by remember { mutableIntStateOf(0) }
     var isPassed by remember { mutableStateOf(false) }
-    var teacherSpokenIntro by remember { mutableStateOf(false) }
-    var activeTab by remember { mutableIntStateOf(0) } // 0: AI Overview & Explanation, 1: Speaking & Pronunciation Practice, 2: Grammar & Context Check
     var feedbackMessage by remember { mutableStateOf("") }
     var missingWordsList by remember { mutableStateOf<List<String>>(emptyList()) }
-    var paceSpeed by remember { mutableStateOf(0.88f) } // Default friendly, clear, human pace
+    var evalReport by remember { mutableStateOf<ChapterEvaluationReport?>(null) }
+    var speechStartTime by remember { mutableStateOf(0L) }
 
-    // Set voice pace on enter
+    // Audio Player controls in Listen Mode (Microsoft Edge Neural Voice default ~0.88x pacing)
+    var paceSpeed by remember { mutableFloatStateOf(0.88f) }
+    var showSubtitleTranslation by remember { mutableStateOf(true) }
+
+    // Bookmark state (persisted locally)
+    val bookmarkPrefs = remember { context.getSharedPreferences("chapter_bookmarks", Context.MODE_PRIVATE) }
+    var isBookmarked by remember {
+        mutableStateOf(bookmarkPrefs.getBoolean("bookmark_${chapter.chapterNumber}", false))
+    }
+
+    // Dialog states
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var showReportDialog by remember { mutableStateOf(false) }
+
+    // Pacing updates
     LaunchedEffect(paceSpeed) {
         ttsHelper.setSpeechRate(paceSpeed)
     }
@@ -175,875 +212,1106 @@ fun ChapterFullViewScreen(
         }
     }
 
-    // Teacher Introduction Text (English + friendly explanation of where this is used)
-    val teacherExplanation = remember(chapter) {
-        "Hello! Aaj hum Chapter ${chapter.chapterNumber}: '${chapter.title}' seekhenge. " +
-        "Yeh real life mein tab kaam aata hai jab aap ${chapter.subtitle.lowercase()}. " +
-        "Sabse zaroori sentence hai: \"${chapter.pronunciationSentence}\". " +
-        "Dhyaan rahe, ${chapter.pronunciationTip}. Chalo ab practice karte hain!"
+    // Speech Evaluation Trigger
+    fun triggerSpeakingEvaluation() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            speechStartTime = System.currentTimeMillis()
+            speechHelper.startListening { result ->
+                if (result.isNotBlank()) {
+                    val durationSec = maxOf(1L, (System.currentTimeMillis() - speechStartTime) / 1000L)
+                    spokenText = result.trim()
+                    evaluatePronunciation(
+                        target = chapter.pronunciationSentence,
+                        spoken = result.trim(),
+                        durationSec = durationSec
+                    ) { report ->
+                        evalReport = report
+                        evaluationScore = report.overallScore
+                        missingWordsList = report.missingWords
+                        feedbackMessage = report.feedback
+                        if (report.overallScore >= 65) {
+                            isPassed = true
+                        } else {
+                            coroutineScope.launch {
+                                repository.logWeakness(
+                                    originalMistake = result.ifBlank { "Unclear utterance" },
+                                    correctedForm = chapter.pronunciationSentence,
+                                    category = "Pronunciation",
+                                    explanation = "Chapter ${chapter.chapterNumber} Score: ${report.overallScore}%. Missing words: [${report.missingWords.joinToString(", ")}]. Tip: ${chapter.pronunciationTip}"
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    val teacherEnglishIntro = remember(chapter) {
-        "Welcome to Chapter ${chapter.chapterNumber}: ${chapter.title}. " +
-        "In this chapter, you'll learn how to handle: ${chapter.subtitle}. " +
-        "We'll practice the exact phrases native speakers use. Let's listen first, then practice speaking together!"
-    }
-
-    // Microphone permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            startSpeechEvaluation(
-                speechHelper = speechHelper,
-                targetSentence = chapter.pronunciationSentence,
-                onSpoken = { result ->
-                    spokenText = result
-                    val score = evaluatePronunciation(
-                        target = chapter.pronunciationSentence,
-                        spoken = result,
-                        onResult = { calculatedScore, missing, feedback ->
-                            evaluationScore = calculatedScore
-                            missingWordsList = missing
-                            feedbackMessage = feedback
-                            if (calculatedScore >= 65) {
-                                isPassed = true
-                            } else {
-                                // Auto-log pronunciation weakness to Room DB
-                                coroutineScope.launch {
-                                    repository.logWeakness(
-                                        originalMistake = result.ifBlank { "Unclear pronunciation" },
-                                        correctedForm = chapter.pronunciationSentence,
-                                        category = "Pronunciation",
-                                        explanation = "Pronunciation error in Chapter ${chapter.chapterNumber}: Missed words [${missing.joinToString(", ")}]. ${chapter.pronunciationTip}"
-                                    )
-                                }
-                            }
-                        }
-                    )
-                }
-            )
+            triggerSpeakingEvaluation()
         } else {
-            Toast.makeText(context, "Microphone permission is needed to evaluate your speech", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Microphone permission is needed for speech evaluation", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun startListeningFlow() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            triggerSpeakingEvaluation()
+        } else {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
     Scaffold(
-        containerColor = Color(0xFF0F1015),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "Chapter ${chapter.chapterNumber}",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+        containerColor = Color(0xFF0F1015)
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF191716),
+                            Color(0xFF111217),
+                            Color(0xFF0B0C10)
                         )
-                        Text(
-                            text = chapter.title,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF9D4EDD),
-                            maxLines = 1
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    )
+                )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // ==========================================
+                // TOP BAR (Matches Screenshot 1 & 2)
+                // ==========================================
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Back button
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .testTag("chapter_back_button")
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
                             tint = Color.White
                         )
                     }
-                },
-                actions = {
-                    // Speech Pace Control toggle (Normal, Slower for clear learning)
-                    IconButton(
-                        onClick = {
-                            paceSpeed = if (paceSpeed < 0.95f) 0.98f else 0.82f
-                            ttsHelper.setSpeechRate(paceSpeed)
-                            Toast.makeText(
-                                context,
-                                if (paceSpeed < 0.90f) "Voice Pace: Relaxed & Human (0.82x)" else "Voice Pace: Natural Conversational (0.98x)",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Speed,
-                            contentDescription = "Adjust Voice Pace",
-                            tint = if (paceSpeed < 0.90f) EmeraldSuccess else AmberTertiary
+
+                    // Center Content: Title in Listen Mode, Progress Bar in Practice Mode
+                    if (currentMode == ChapterMode.LISTEN) {
+                        Text(
+                            text = chapter.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                            maxLines = 1
                         )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF14151B)
-                )
-            )
-        }
-    ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 16.dp, bottom = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Chapter Hero Card with Context Banner & AI Avatar
-            item {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color(0xFF1A1B22),
-                    border = BorderStroke(1.dp, Color(0xFF2E313D)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column {
+                    } else {
+                        // Sleek Horizontal Cyan Progress Bar (Screenshot 2)
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(160.dp)
+                                .weight(1f)
+                                .padding(horizontal = 16.dp)
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color(0xFF1C2735))
                         ) {
-                            Image(
-                                painter = painterResource(id = chapter.imageRes),
-                                contentDescription = chapter.title,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
+                            val progressFraction = if (isPassed) 1.0f else if (spokenText.isNotBlank()) 0.65f else 0.33f
                             Box(
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            colors = listOf(Color.Transparent, Color(0xDD1A1B22), Color(0xFF1A1B22))
-                                        )
-                                    )
-                            )
-                            // Chapter badge
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFF9D4EDD),
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(14.dp)
-                            ) {
-                                Text(
-                                    text = "CHAPTER ${chapter.chapterNumber} • REAL-LIFE MASTERY",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = chapter.title,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = chapter.subtitle,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(0xFFB4B7C5)
+                                    .fillMaxWidth(fraction = progressFraction)
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(Color(0xFF4CC9F0))
                             )
                         }
                     }
-                }
-            }
 
-            // AI Teacher Persona Box (Explains kya padhenge, kaha use hoga, normal human pace)
-            item {
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = Color(0xFF181B26),
-                    border = BorderStroke(1.5.dp, if (isSpeaking) Color(0xFF9D4EDD) else Color(0xFF282C3D)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    // Right Rounded Pill with Settings (⚙) and Flag (⚑)
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFF1C1E26),
+                        border = BorderStroke(1.dp, Color(0xFF2C303F))
+                    ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF9D4EDD)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.RecordVoiceOver,
-                                    contentDescription = "AI Coach",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "AI Voice Coach (Teacher)",
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    fontSize = 15.sp
-                                )
-                                Text(
-                                    text = if (isSpeaking) "Speaking now (Pace: ${(paceSpeed * 100).roundToInt()}%) • Listen carefully" else "Tap below to listen & understand",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isSpeaking) Color(0xFFC77DFF) else Color(0xFF8E92A0)
-                                )
-                            }
-
                             IconButton(
-                                onClick = {
-                                    if (isSpeaking) {
-                                        ttsHelper.stop()
-                                    } else {
-                                        teacherSpokenIntro = true
-                                        ttsHelper.setSpeechRate(paceSpeed)
-                                        ttsHelper.speak(teacherExplanation)
-                                    }
-                                }
+                                onClick = { showSettingsDialog = true },
+                                modifier = Modifier.size(32.dp).testTag("chapter_settings_button")
                             ) {
                                 Icon(
-                                    imageVector = if (isSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
-                                    contentDescription = "Listen to AI Teacher",
-                                    tint = Color(0xFFC77DFF)
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = "Lesson Settings",
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(17.dp)
                                 )
                             }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Real-life purpose explanation
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFF222533)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Lightbulb,
-                                        contentDescription = null,
-                                        tint = AmberTertiary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Yeh Kaha Use Hoga (Real-World Use):",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = AmberTertiary
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "Jab aap daily life mein ${chapter.subtitle.lowercase()} karenge, toh yeh conversation flow exact native standard par kaam aayega.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFFD3D5E0),
-                                    lineHeight = 18.sp
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Button to speak explanation in human pace
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    ttsHelper.setSpeechRate(paceSpeed)
-                                    ttsHelper.speak(teacherExplanation)
-                                },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9D4EDD))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.RecordVoiceOver,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Explain in Hindi/English", fontSize = 12.sp)
-                            }
-
-                            OutlinedButton(
-                                onClick = {
-                                    ttsHelper.setSpeechRate(paceSpeed)
-                                    ttsHelper.speak(teacherEnglishIntro)
-                                },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.VolumeUp,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("English Native", fontSize = 12.sp)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Key Vocabulary for this Chapter
-            item {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF1B1C23),
-                    border = BorderStroke(1.dp, Color(0xFF2C2F3C)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.School,
-                                    contentDescription = null,
-                                    tint = Color(0xFF48CAE4),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Key Chapter Vocabulary",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = Color(0xFF48CAE4)
-                                )
-                            }
-
                             IconButton(
-                                onClick = {
-                                    ttsHelper.speak("${chapter.vocabWord}. Definition: ${chapter.vocabDefinition}. Example: ${chapter.vocabExample}")
-                                }
+                                onClick = { showReportDialog = true },
+                                modifier = Modifier.size(32.dp).testTag("chapter_report_button")
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.VolumeUp,
-                                    contentDescription = "Listen to vocab",
-                                    tint = Color(0xFF48CAE4)
+                                    imageVector = Icons.Default.Flag,
+                                    contentDescription = "Report Lesson",
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(17.dp)
                                 )
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = chapter.vocabWord,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black,
-                            color = Color.White
-                        )
-                        Text(
-                            text = chapter.vocabDefinition,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFA0A4B4)
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF242735),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "Example: \"${chapter.vocabExample}\"",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFE2E4EE),
-                                modifier = Modifier.padding(10.dp)
-                            )
-                        }
                     }
                 }
-            }
 
-            // Practice Sentence & Speech Recognition Section
-            item {
+                // Mode Switcher Tab (Listen vs Practice)
                 Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = Color(0xFF1A1C25),
-                    border = BorderStroke(
-                        1.5.dp,
-                        if (isPassed) EmeraldSuccess else if (isListening) RoseError else Color(0xFF333748)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color(0xFF161821),
+                    border = BorderStroke(1.dp, Color(0xFF262A38)),
+                    modifier = Modifier.padding(vertical = 4.dp)
                 ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Speaking & Pronunciation Test",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isPassed) EmeraldSuccess.copy(alpha = 0.2f) else AmberTertiary.copy(alpha = 0.2f)
-                            ) {
-                                Text(
-                                    text = if (isPassed) "✅ UNLOCKED" else "🔒 REQUIRED TO PASS",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isPassed) EmeraldSuccess else AmberTertiary,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Target line to speak
+                    Row(modifier = Modifier.padding(3.dp)) {
                         Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = Color(0xFF232636),
-                            border = BorderStroke(1.dp, Color(0xFF373B50)),
-                            modifier = Modifier.fillMaxWidth()
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (currentMode == ChapterMode.LISTEN) Color(0xFF2E3345) else Color.Transparent,
+                            modifier = Modifier.clickable {
+                                currentMode = ChapterMode.LISTEN
+                            }
                         ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = "Target Sentence to Speak:",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFC77DFF)
-                                    )
-
-                                    IconButton(
-                                        onClick = {
-                                            ttsHelper.setSpeechRate(paceSpeed)
-                                            ttsHelper.speak(chapter.pronunciationSentence)
-                                        },
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.VolumeUp,
-                                            contentDescription = "Listen to Model",
-                                            tint = Color(0xFFC77DFF),
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "\"${chapter.pronunciationSentence}\"",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color.White,
-                                    lineHeight = 24.sp
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Info,
-                                        contentDescription = null,
-                                        tint = AmberTertiary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Pronunciation Tip: ${chapter.pronunciationTip}",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFFD0D3E2)
-                                    )
-                                }
-                            }
+                            Text(
+                                text = "🎧 Listen Lesson",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (currentMode == ChapterMode.LISTEN) Color.White else Color(0xFFA0A4B4),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                            )
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Mic Button and Real-Time Feedback
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (currentMode == ChapterMode.PRACTICE) Color(0xFF4CC9F0) else Color.Transparent,
+                            modifier = Modifier.clickable {
+                                currentMode = ChapterMode.PRACTICE
+                            }
                         ) {
-                            Button(
-                                onClick = {
-                                    if (isListening) {
-                                        speechHelper.stopListening()
-                                    } else {
-                                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                                            == PackageManager.PERMISSION_GRANTED
-                                        ) {
-                                            startSpeechEvaluation(
-                                                speechHelper = speechHelper,
-                                                targetSentence = chapter.pronunciationSentence,
-                                                onSpoken = { result ->
-                                                    spokenText = result
-                                                    evaluatePronunciation(
-                                                        target = chapter.pronunciationSentence,
-                                                        spoken = result,
-                                                        onResult = { score, missing, feedback ->
-                                                            evaluationScore = score
-                                                            missingWordsList = missing
-                                                            feedbackMessage = feedback
-                                                            if (score >= 65) {
-                                                                isPassed = true
-                                                            } else {
-                                                                coroutineScope.launch {
-                                                                    repository.logWeakness(
-                                                                        originalMistake = result.ifBlank { "Speech unclear" },
-                                                                        correctedForm = chapter.pronunciationSentence,
-                                                                        category = "Pronunciation",
-                                                                        explanation = "Chapter ${chapter.chapterNumber} check failed ($score/100). Missing: [${missing.joinToString(", ")}]. ${chapter.pronunciationTip}"
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-                                                    )
-                                                }
-                                            )
-                                        } else {
-                                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                        }
-                                    }
-                                },
-                                shape = CircleShape,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isListening) RoseError else Color(0xFF9D4EDD)
-                                ),
-                                modifier = Modifier
-                                    .size(68.dp)
-                                    .testTag("chapter_mic_button")
-                            ) {
-                                Icon(
-                                    imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
-                                    contentDescription = "Speak Sentence",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(32.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = if (isListening) "Listening... speak now" else "Tap Mic & Speak the sentence",
-                                style = MaterialTheme.typography.bodySmall,
+                                text = "🗣️ Speak Practice",
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isListening) Color(0xFFFF758F) else Color(0xFFC77DFF)
-                            )
-                        }
-
-                        // Real-time spoken text preview
-                        if (isListening && spokenPartial.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0xFF262835),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "Hearing: \"$spokenPartial\"",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFFE2E4EE),
-                                    modifier = Modifier.padding(10.dp)
-                                )
-                            }
-                        }
-
-                        // Evaluated Result Display
-                        if (spokenText.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            HorizontalDivider(color = Color(0xFF2E3244))
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            Text(
-                                text = "You said: \"$spokenText\"",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Pronunciation & Clarity: $evaluationScore / 100",
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isPassed) EmeraldSuccess else RoseError,
-                                    fontSize = 15.sp
-                                )
-                                Text(
-                                    text = if (isPassed) "PASSED ✅" else "TRY AGAIN (Needed: 65%)",
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isPassed) EmeraldSuccess else AmberTertiary,
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-                            LinearProgressIndicator(
-                                progress = { (evaluationScore / 100f).coerceIn(0f, 1f) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(8.dp)
-                                    .clip(RoundedCornerShape(4.dp)),
-                                color = if (isPassed) EmeraldSuccess else AmberTertiary,
-                                trackColor = Color(0xFF2A2D3C)
-                            )
-
-                            if (feedbackMessage.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = feedbackMessage,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isPassed) EmeraldSuccess else AmberTertiary
-                                )
-                            }
-
-                            if (!isPassed && missingWordsList.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = RoseError.copy(alpha = 0.15f),
-                                    border = BorderStroke(1.dp, RoseError.copy(alpha = 0.4f)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = "⚠️ Auto-logged to Mistake Bank: Practice these words: [${missingWordsList.joinToString(", ")}]",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFFFF94A4),
-                                        modifier = Modifier.padding(10.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Quick Grammar Check Section (to confirm understanding of where it is used)
-            item {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF1A1C24),
-                    border = BorderStroke(1.dp, Color(0xFF2B2E3E)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = Color(0xFF06D6A0),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Natural Grammar & Context Check",
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF06D6A0),
-                                fontSize = 14.sp
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = chapter.grammarQuestion,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        var selectedOption by remember { mutableStateOf<Int?>(null) }
-                        var answeredCorrectly by remember { mutableStateOf<Boolean?>(null) }
-
-                        chapter.grammarOptions.forEachIndexed { index, option ->
-                            val isChosen = selectedOption == index
-                            val isThisCorrect = index == chapter.correctGrammarIndex
-                            val optionBorder = when {
-                                selectedOption == null -> Color(0xFF323647)
-                                isChosen && isThisCorrect -> EmeraldSuccess
-                                isChosen && !isThisCorrect -> RoseError
-                                isThisCorrect -> EmeraldSuccess.copy(alpha = 0.6f)
-                                else -> Color(0xFF282B38)
-                            }
-
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isChosen) Color(0xFF25293A) else Color(0xFF1E212D),
-                                border = BorderStroke(1.dp, optionBorder),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
-                                    .clickable {
-                                        if (selectedOption == null) {
-                                            selectedOption = index
-                                            val correct = (index == chapter.correctGrammarIndex)
-                                            answeredCorrectly = correct
-                                            if (!correct) {
-                                                coroutineScope.launch {
-                                                    repository.logWeakness(
-                                                        originalMistake = option,
-                                                        correctedForm = chapter.grammarOptions[chapter.correctGrammarIndex],
-                                                        category = "Grammar",
-                                                        explanation = "Chapter ${chapter.chapterNumber}: ${chapter.grammarExplanation}"
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                            ) {
-                                Text(
-                                    text = "${('A' + index)}. $option",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
-                        }
-
-                        if (selectedOption != null) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = chapter.grammarExplanation,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (answeredCorrectly == true) EmeraldSuccess else AmberTertiary
+                                color = if (currentMode == ChapterMode.PRACTICE) Color(0xFF0F1015) else Color(0xFFA0A4B4),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                             )
                         }
                     }
                 }
-            }
 
-            // Bottom Complete & Unlock Action (Controlled strictly by App evaluation)
-            item {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    if (!isPassed) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFF202330),
-                            border = BorderStroke(1.dp, Color(0xFF333748)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = null,
-                                    tint = AmberTertiary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = "Speak the sentence above with 65%+ clarity to unlock this chapter. The app will grade your pronunciation.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFFD4D7E4)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                    }
+                Spacer(modifier = Modifier.height(10.dp))
 
-                    Button(
-                        onClick = {
-                            if (isPassed) {
-                                onChapterMastered()
-                                Toast.makeText(context, "🎉 Chapter ${chapter.chapterNumber} Mastered & Unlocked!", Toast.LENGTH_LONG).show()
-                                onBack()
+                // ==========================================
+                // SCREEN BODY BASED ON SELECTED MODE
+                // ==========================================
+                if (currentMode == ChapterMode.LISTEN) {
+                    // SCREENSHOT 1: Full-Screen Lesson Avatar + Floating Dock
+                    ListenLessonContent(
+                        chapter = chapter,
+                        isSpeaking = isSpeaking,
+                        paceSpeed = paceSpeed,
+                        showSubtitleTranslation = showSubtitleTranslation,
+                        ttsHelper = ttsHelper,
+                        onPaceChanged = { paceSpeed = it },
+                        onToggleTranslation = { showSubtitleTranslation = !showSubtitleTranslation },
+                        onSwitchToPractice = { currentMode = ChapterMode.PRACTICE }
+                    )
+                } else {
+                    // SCREENSHOT 2: Practice Card + Speech Recognition + Giant Mic
+                    SpeakPracticeContent(
+                        chapter = chapter,
+                        isListening = isListening,
+                        spokenPartial = spokenPartial,
+                        spokenText = spokenText,
+                        evalReport = evalReport,
+                        evaluationScore = evaluationScore,
+                        isPassed = isPassed,
+                        missingWordsList = missingWordsList,
+                        feedbackMessage = feedbackMessage,
+                        isBookmarked = isBookmarked,
+                        ttsHelper = ttsHelper,
+                        paceSpeed = paceSpeed,
+                        onToggleBookmark = {
+                            isBookmarked = !isBookmarked
+                            bookmarkPrefs.edit().putBoolean("bookmark_${chapter.chapterNumber}", isBookmarked).apply()
+                            Toast.makeText(
+                                context,
+                                if (isBookmarked) "Phrase saved to Favorites!" else "Removed from Favorites",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        onStartListening = {
+                            if (isListening) {
+                                speechHelper.stopListening()
                             } else {
-                                Toast.makeText(
-                                    context,
-                                    "Please complete the speaking test with at least 65% score before completing!",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                startListeningFlow()
                             }
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp)
-                            .testTag("chapter_complete_button"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isPassed) EmeraldSuccess else Color(0xFF4A4E62)
-                        ),
-                        enabled = isPassed
-                    ) {
-                        Icon(
-                            imageVector = if (isPassed) Icons.Default.Check else Icons.Default.Lock,
-                            contentDescription = null
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        onChapterMastered = onChapterMastered,
+                        onSwitchToListen = { currentMode = ChapterMode.LISTEN }
+                    )
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // IN-LESSON SETTINGS DIALOG (⚙)
+    // ==========================================
+    if (showSettingsDialog) {
+        val currentEngine by aiEngineManager.currentActiveEngine.collectAsState()
+
+        AlertDialog(
+            onDismissRequest = { showSettingsDialog = false },
+            containerColor = Color(0xFF181A24),
+            title = {
+                Text(
+                    text = "Lesson & AI Engine Settings",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            },
+            text = {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    item {
                         Text(
-                            text = if (isPassed) "Chapter Mastered • Unlock Next" else "Locked • Speak Sentence to Unlock",
+                            text = "Select Active AI Engine:",
+                            style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
+                            color = Color(0xFF4CC9F0)
+                        )
+                    }
+
+                    items(AiEngine.values().toList()) { engine ->
+                        val isSelected = currentEngine == engine
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) Color(0xFF262C3D) else Color(0xFF1E212B),
+                            border = BorderStroke(1.dp, if (isSelected) Color(0xFF4CC9F0) else Color(0xFF2E3242)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    aiEngineManager.setEngine(engine)
+                                    Toast.makeText(context, "Active: ${engine.displayName}", Toast.LENGTH_SHORT).show()
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = { aiEngineManager.setEngine(engine) },
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = Color(0xFF4CC9F0),
+                                        unselectedColor = Color.Gray
+                                    )
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        text = engine.displayName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "${engine.provider} • ${engine.badge}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFFA0A4B4)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Voice Pace Speed: ${(paceSpeed * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF4CC9F0)
+                        )
+                        Slider(
+                            value = paceSpeed,
+                            onValueChange = { paceSpeed = it },
+                            valueRange = 0.75f..1.25f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFF4CC9F0),
+                                activeTrackColor = Color(0xFF4CC9F0)
+                            )
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSettingsDialog = false }) {
+                    Text("Done", color = Color(0xFF4CC9F0), fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // ==========================================
+    // FLAG / REPORT MISTAKE DIALOG (⚑)
+    // ==========================================
+    if (showReportDialog) {
+        AlertDialog(
+            onDismissRequest = { showReportDialog = false },
+            containerColor = Color(0xFF181A24),
+            title = {
+                Text(
+                    text = "Report Lesson Feedback",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Help us improve Chapter ${chapter.chapterNumber}: '${chapter.title}'",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFA0A4B4)
+                    )
+
+                    listOf(
+                        "Pronunciation audio unclear",
+                        "Hindi / Hinglish translation issue",
+                        "Difficulty level too high / low",
+                        "Other suggestion"
+                    ).forEach { issue ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF222533),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showReportDialog = false
+                                    Toast.makeText(context, "Thank you! Feedback reported for review.", Toast.LENGTH_SHORT).show()
+                                }
+                        ) {
+                            Text(
+                                text = issue,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showReportDialog = false }) {
+                    Text("Cancel", color = Color(0xFFA0A4B4))
+                }
+            }
+        )
+    }
+}
+
+// ==============================================================================
+// 1. LISTEN LESSON CONTENT (Directly Implements Screenshot 1)
+// ==============================================================================
+@Composable
+private fun ListenLessonContent(
+    chapter: ChapterDailyTopic,
+    isSpeaking: Boolean,
+    paceSpeed: Float,
+    showSubtitleTranslation: Boolean,
+    ttsHelper: TextToSpeechHelper,
+    onPaceChanged: (Float) -> Unit,
+    onToggleTranslation: () -> Unit,
+    onSwitchToPractice: () -> Unit
+) {
+    val context = LocalContext.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Large Center Tutor Avatar with Dual-Tone Arc Ring (Peach Top + Bronze Bottom)
+        Box(
+            modifier = Modifier.size(240.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Animated pulsating wave ring while tutor is speaking
+            if (isSpeaking) {
+                val infiniteTransition = rememberInfiniteTransition(label = "audioWave")
+                val pulseScale by infiniteTransition.animateFloat(
+                    initialValue = 1.0f,
+                    targetValue = 1.08f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(800, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "pulse"
+                )
+                Box(
+                    modifier = Modifier
+                        .size(236.dp * pulseScale)
+                        .clip(CircleShape)
+                        .background(Color(0xFFF4CBB2).copy(alpha = 0.12f))
+                )
+            }
+
+            // Two-tone circular progress/accent arc ring:
+            // Top Arc: Peach/cream (#F4CBB2)
+            // Bottom Arc: Bronze/taupe (#8C6D58)
+            Canvas(modifier = Modifier.size(236.dp)) {
+                val strokeWidth = 7.dp.toPx()
+                val diameter = size.minDimension - strokeWidth
+                val topLeft = Offset(strokeWidth / 2, strokeWidth / 2)
+                val arcSize = Size(diameter, diameter)
+
+                // Top arc (180 degrees from -180° to 0°) - Peach / cream
+                drawArc(
+                    color = Color(0xFFF4CBB2),
+                    startAngle = 180f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                )
+
+                // Bottom arc (180 degrees from 0° to 180°) - Bronze / taupe
+                drawArc(
+                    color = Color(0xFF8C6D58),
+                    startAngle = 0f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                )
+            }
+
+            // Tutor portrait image
+            Box(
+                modifier = Modifier
+                    .size(212.dp)
+                    .clip(CircleShape)
+            ) {
+                Image(
+                    painter = painterResource(id = chapter.imageRes),
+                    contentDescription = chapter.tutorName,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        }
+
+        // Subtitle & Hinglish Translation Card (Toggleable via 文A)
+        AnimatedVisibility(visible = showSubtitleTranslation) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xFF181B24).copy(alpha = 0.95f),
+                border = BorderStroke(1.dp, Color(0xFF2C3040)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "\"${chapter.pronunciationSentence}\"",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 22.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = chapter.hindiTranslation.ifBlank { "Mera naam Alex hai. Tumse milkar khushi hui." },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFFB0B4C4),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // ==========================================
+        // FLOATING PLAYER DOCK (Screenshot 1)
+        // [ 文A ]  [ ↺ 5 ]  [  ▶ / ⏸  ]  [ ↻ 5 ]  [ 1.0x ]
+        // ==========================================
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = Color(0xFF1B1D26),
+            border = BorderStroke(1.dp, Color(0xFF2B2F3E)),
+            shadowElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 1. Translation Toggle (文A)
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .clickable { onToggleTranslation() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "文A",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (showSubtitleTranslation) Color(0xFF4CC9F0) else Color(0xFFA0A4B4)
+                    )
+                }
+
+                // 2. Rewind 5s (↺ 5)
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            ttsHelper.stop()
+                            ttsHelper.speak(chapter.pronunciationSentence)
+                            Toast.makeText(context, "↺ Replaying model phrase", Toast.LENGTH_SHORT).show()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "↺",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "5",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                // 3. Large White Play / Pause Button
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .clickable {
+                            if (isSpeaking) {
+                                ttsHelper.stop()
+                            } else {
+                                val fullIntro = "Hi! I am ${chapter.tutorName}. Let's learn: ${chapter.pronunciationSentence}."
+                                ttsHelper.speak(fullIntro)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isSpeaking) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (isSpeaking) "Pause" else "Play",
+                        tint = Color(0xFF0F1015),
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+
+                // 4. Forward 5s (↻ 5)
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            ttsHelper.stop()
+                            ttsHelper.speak("Remember this tip: ${chapter.pronunciationTip}")
+                            Toast.makeText(context, "Tip: ${chapter.pronunciationTip}", Toast.LENGTH_SHORT).show()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "5",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "↻",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                // 5. Speed Indicator / Toggle (0.88x / 1.0x / 0.8x / 1.1x)
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            val nextPace = when (paceSpeed) {
+                                0.88f -> 1.0f
+                                1.0f -> 1.15f
+                                1.15f -> 0.78f
+                                else -> 0.88f
+                            }
+                            onPaceChanged(nextPace)
+                            Toast.makeText(context, "Voice Pace: ${nextPace}x", Toast.LENGTH_SHORT).show()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (paceSpeed == 0.88f) "0.88x" else "${paceSpeed}x",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Prominent button to smoothly transition to Speaking Practice (Screenshot 2)
+        Button(
+            onClick = onSwitchToPractice,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF4CC9F0)
+            ),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .testTag("start_speaking_practice_button")
+        ) {
+            Text(
+                text = "Next: Practice Speaking ➔",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0F1015)
+            )
+        }
+    }
+}
+
+// ==============================================================================
+// 2. SPEAK PRACTICE CONTENT (Directly Implements Screenshot 2)
+// ==============================================================================
+@Composable
+private fun SpeakPracticeContent(
+    chapter: ChapterDailyTopic,
+    isListening: Boolean,
+    spokenPartial: String,
+    spokenText: String,
+    evalReport: ChapterEvaluationReport?,
+    evaluationScore: Int,
+    isPassed: Boolean,
+    missingWordsList: List<String>,
+    feedbackMessage: String,
+    isBookmarked: Boolean,
+    ttsHelper: TextToSpeechHelper,
+    paceSpeed: Float,
+    onToggleBookmark: () -> Unit,
+    onStartListening: () -> Unit,
+    onChapterMastered: () -> Unit,
+    onSwitchToListen: () -> Unit
+) {
+    val context = LocalContext.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        // Top Section: Circular Tutor Avatar with Glowing Cyan Border & Downward Pointer Tick
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Tutor Avatar (~130dp) with cyan border (Screenshot 2)
+            Box(
+                modifier = Modifier
+                    .size(132.dp)
+                    .border(3.dp, Color(0xFF4CC9F0), CircleShape)
+                    .padding(3.dp)
+                    .clip(CircleShape)
+            ) {
+                Image(
+                    painter = painterResource(id = chapter.imageRes),
+                    contentDescription = chapter.tutorName,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+
+            // Downward Pointer Triangle Tick
+            Canvas(modifier = Modifier.size(16.dp, 8.dp)) {
+                val path = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(size.width, 0f)
+                    lineTo(size.width / 2, size.height)
+                    close()
+                }
+                drawPath(path = path, color = Color(0xFF1C1E28))
+            }
+
+            // Speech Badge: "Try speaking this sentence"
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xFF1C1E28),
+                border = BorderStroke(1.dp, Color(0xFF2C3040))
+            ) {
+                Text(
+                    text = "Try speaking this sentence",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Main Practice Card with Cyan Border (Screenshot 2)
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFF13151D),
+            border = BorderStroke(1.5.dp, Color(0xFF4CC9F0)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                // Top Header inside Practice Card:
+                // Left: "📖 Tap on Mic and Read"
+                // Right: [🔊] Listen  [🔖] Bookmark
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("📖", fontSize = 16.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Tap on Mic and Read",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                     }
 
-                    // Optional Full Conversation Roleplay button
-                    if (chapter.roleplayPrompt.isNotBlank() && onLaunchRoleplay != null) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        OutlinedButton(
-                            onClick = {
-                                onLaunchRoleplay("scenario_daily_${chapter.chapterNumber}")
-                            },
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Speaker button (cyan circle)
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp),
-                            shape = RoundedCornerShape(14.dp)
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF4CC9F0).copy(alpha = 0.18f))
+                                .clickable {
+                                    ttsHelper.setSpeechRate(paceSpeed)
+                                    ttsHelper.speak(chapter.pronunciationSentence)
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                tint = Color(0xFFC77DFF)
+                                imageVector = Icons.Default.VolumeUp,
+                                contentDescription = "Listen to Model",
+                                tint = Color(0xFF4CC9F0),
+                                modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Full Conversation Practice with AI", color = Color(0xFFC77DFF))
+                        }
+
+                        // Bookmark button (cyan circle)
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF4CC9F0).copy(alpha = 0.18f))
+                                .clickable { onToggleBookmark() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                contentDescription = "Bookmark Phrase",
+                                tint = Color(0xFF4CC9F0),
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Bold Target Sentence in White (Tap any word to pronounce individually!)
+                val words = chapter.pronunciationSentence.split(" ")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    Column {
+                        Text(
+                            text = "\"${chapter.pronunciationSentence}\"",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            lineHeight = 26.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Roman Hindi / Hinglish translation
+                        Text(
+                            text = chapter.hindiTranslation.ifBlank { "Mera naam Alex hai. Tumse milkar khushi hui." },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFF9AA0B2)
+                        )
+                    }
+                }
+
+                // Interactive feature: Word-by-word pronunciation pills
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    words.take(5).forEach { word ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF1E2230),
+                            modifier = Modifier.clickable {
+                                ttsHelper.speak(word.replace(Regex("[^a-zA-Z]"), ""))
+                            }
+                        ) {
+                            Text(
+                                text = word,
+                                fontSize = 11.sp,
+                                color = Color(0xFF4CC9F0),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Spoken Speech Feedback & 4-Pillar Score Display
+                if (spokenText.isNotBlank() && evalReport != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = Color(0xFF262A3A))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "You said: \"$spokenText\"",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFFE2E5F0)
+                            )
+                            Text(
+                                text = feedbackMessage,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isPassed) EmeraldSuccess else AmberTertiary
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isPassed) EmeraldSuccess.copy(alpha = 0.2f) else RoseError.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = "$evaluationScore / 100",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isPassed) EmeraldSuccess else RoseError,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    // 4 Pillars Chips
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        ScorePillarChip("Fluency", "${evalReport.fluencyScore}%")
+                        ScorePillarChip("Fillers", "${evalReport.fillerCount}")
+                        ScorePillarChip("Pace", "${evalReport.wpm} WPM")
+                        ScorePillarChip("Structure", "${evalReport.structureScore}%")
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Real-time audio hearing transcript preview
+        if (isListening && spokenPartial.isNotBlank()) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF1E2333),
+                modifier = Modifier.padding(horizontal = 16.dp)
+            ) {
+                Text(
+                    text = "Hearing: \"$spokenPartial\"",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF4CC9F0),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // ==========================================
+        // GIANT INTERACTIVE MIC BUTTON (Screenshot 2)
+        // Outer dark circular halo ring + Inner bright cyan mic
+        // ==========================================
+        Box(
+            modifier = Modifier.size(130.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Outer Halo Ring with animated breathing pulse when listening
+            val infiniteTransition = rememberInfiniteTransition(label = "haloTransition")
+            val haloAlpha by infiniteTransition.animateFloat(
+                initialValue = if (isListening) 0.35f else 0.15f,
+                targetValue = if (isListening) 0.85f else 0.25f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(900, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "haloAlpha"
+            )
+
+            Box(
+                modifier = Modifier
+                    .size(122.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF192433).copy(alpha = haloAlpha))
+                    .border(2.dp, Color(0xFF4CC9F0).copy(alpha = if (isListening) 0.8f else 0.25f), CircleShape)
+            )
+
+            // Inner Cyan Mic Button
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(if (isListening) RoseError else Color(0xFF4CC9F0))
+                    .clickable { onStartListening() }
+                    .testTag("giant_practice_mic_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
+                    contentDescription = if (isListening) "Stop Recording" else "Speak Now",
+                    tint = Color.White,
+                    modifier = Modifier.size(34.dp)
+                )
+            }
+        }
+
+        // Action Buttons: If passed -> Continue/Mastered button, else Switch to Listen option
+        if (isPassed) {
+            Button(
+                onClick = onChapterMastered,
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("next_chapter_button")
+            ) {
+                Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color.White)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Passed (Score: $evaluationScore%) • Continue Next Chapter ➔",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+        } else {
+            OutlinedButton(
+                onClick = onSwitchToListen,
+                border = BorderStroke(1.dp, Color(0xFF2C3244)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.height(40.dp)
+            ) {
+                Text(
+                    text = "🎧 Back to Listen Mode",
+                    fontSize = 13.sp,
+                    color = Color(0xFFA0A4B4)
+                )
             }
         }
     }
 }
 
-/**
- * Starts speech recognition with fallback to ensure the user is heard properly.
- */
-private fun startSpeechEvaluation(
-    speechHelper: SpeechRecognitionHelper,
-    targetSentence: String,
-    onSpoken: (String) -> Unit
-) {
-    speechHelper.startListening { result ->
-        if (result.isNotBlank()) {
-            onSpoken(result.trim())
+@Composable
+private fun ScorePillarChip(label: String, value: String) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF1E2230)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(text = label, fontSize = 10.sp, color = Color(0xFF8E92A4))
+            Text(text = value, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
         }
     }
 }
 
-/**
- * Evaluates spoken result against target sentence using normalized word-level and phonetic matching.
- * Provides granular accuracy score, detected missing words, and helpful advice.
- */
+// ==============================================================================
+// 3. 4-PILLAR EVALUATION ALGORITHM & STRING MATCHING
+// ==============================================================================
 private fun evaluatePronunciation(
     target: String,
     spoken: String,
-    onResult: (score: Int, missingWords: List<String>, feedback: String) -> Unit
+    durationSec: Long = 3L,
+    onResult: (report: ChapterEvaluationReport) -> Unit
 ): Int {
     val cleanTarget = target.lowercase().replace(Regex("[^a-z0-9\\s]"), "")
     val cleanSpoken = spoken.lowercase().replace(Regex("[^a-z0-9\\s]"), "")
@@ -1052,10 +1320,28 @@ private fun evaluatePronunciation(
     val spokenWords = cleanSpoken.split(Regex("\\s+")).filter { it.isNotBlank() }
 
     if (spokenWords.isEmpty()) {
-        onResult(0, targetWords, "No clear speech detected. Please speak clearly closer to the microphone.")
+        val emptyReport = ChapterEvaluationReport(
+            overallScore = 0,
+            fluencyScore = 0,
+            fillerCount = 0,
+            wpm = 0,
+            structureScore = 0,
+            missingWords = targetWords,
+            feedback = "No clear speech detected. Please tap mic and speak clearly."
+        )
+        onResult(emptyReport)
         return 0
     }
 
+    // 1. Detect filler words ("um", "uh", "er", "like", "actually", "basically", "you know")
+    val fillerRegex = Regex("\\b(um|uh|er|ah|like|actually|basically|you know)\\b", RegexOption.IGNORE_CASE)
+    val fillerCount = fillerRegex.findAll(spoken).count()
+
+    // 2. Estimate Pace (WPM)
+    val safeDuration = maxOf(1L, durationSec)
+    val calculatedWpm = ((spokenWords.size * 60L) / safeDuration).toInt().coerceIn(45, 210)
+
+    // 3. Sentence Structure & Word Accuracy
     val spokenSet = spokenWords.toSet()
     val missingWords = mutableListOf<String>()
     var matchedCount = 0
@@ -1064,7 +1350,6 @@ private fun evaluatePronunciation(
         if (spokenSet.contains(word)) {
             matchedCount++
         } else {
-            // Check near match (Levenshtein distance <= 2 for pronunciation tolerance)
             val nearMatch = spokenWords.any { s -> isNearMatch(word, s) }
             if (nearMatch) {
                 matchedCount++
@@ -1078,15 +1363,36 @@ private fun evaluatePronunciation(
         matchedCount.toFloat() / targetWords.size.toFloat()
     } else 1.0f
 
-    val calculatedScore = (matchRatio * 100).roundToInt().coerceIn(10, 100)
+    val structureScore = (matchRatio * 100).roundToInt().coerceIn(10, 100)
+
+    // 4. Fluency Score based on Pace and Filler words
+    val paceScore = when (calculatedWpm) {
+        in 110..160 -> 95
+        in 90..109, in 161..185 -> 80
+        else -> 65
+    }
+    val fillerPenalty = (fillerCount * 8).coerceAtMost(30)
+    val fluencyScore = (paceScore - fillerPenalty).coerceIn(20, 100)
+
+    // Overall blended score (65% required to pass)
+    val calculatedScore = ((structureScore * 0.65f) + (fluencyScore * 0.35f)).roundToInt().coerceIn(10, 100)
 
     val feedback = when {
-        calculatedScore >= 85 -> "Excellent pronunciation! Very clear and natural."
-        calculatedScore >= 65 -> "Good job! You passed. Try repeating once more to smooth out cadence."
-        else -> "Needs improvement on words: ${missingWords.take(3).joinToString(", ")}. Tap Listen to hear the native guide."
+        calculatedScore >= 85 -> "Outstanding! Natural pace ($calculatedWpm WPM), clean pronunciation & fluent rhythm."
+        calculatedScore >= 65 -> "Passed ($calculatedScore%)! Met the 65% threshold. Great job!"
+        else -> "Score: $calculatedScore% (Need 65%+ to pass). Missed: ${missingWords.take(3).joinToString(", ")}. Tap 🔊 to listen again."
     }
 
-    onResult(calculatedScore, missingWords, feedback)
+    val report = ChapterEvaluationReport(
+        overallScore = calculatedScore,
+        fluencyScore = fluencyScore,
+        fillerCount = fillerCount,
+        wpm = calculatedWpm,
+        structureScore = structureScore,
+        missingWords = missingWords,
+        feedback = feedback
+    )
+    onResult(report)
     return calculatedScore
 }
 

@@ -112,7 +112,7 @@ fun AiEngineSelectionDialog(
                     val isTesting = testingMap[engine] == true
                     val latency = latencyMap[engine]
 
-                    ElevatedCard(
+                    Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
@@ -120,13 +120,16 @@ fun AiEngineSelectionDialog(
                             }
                             .testTag("engine_card_${engine.id}"),
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.elevatedCardColors(
+                        colors = CardDefaults.cardColors(
                             containerColor = if (isSelected)
                                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                             else
                                 MaterialTheme.colorScheme.surface
                         ),
-                        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+                        border = if (isSelected)
+                            androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                        else
+                            androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             Row(
@@ -140,17 +143,23 @@ fun AiEngineSelectionDialog(
                                 ) {
                                     Icon(
                                         imageVector = when (engine) {
-                                            AiEngine.GEMINI_FLASH -> Icons.Default.Bolt
-                                            AiEngine.POLLINATIONS_GPT4O -> Icons.Default.Cloud
-                                            AiEngine.POLLINATIONS_CLAUDE -> Icons.Default.Psychology
-                                            AiEngine.INSTANT_LOCAL -> Icons.Default.OfflinePin
+                                            AiEngine.GEMINI_15_FLASH -> Icons.Default.Bolt
+                                            AiEngine.GITHUB_MODELS -> Icons.Default.Psychology
+                                            AiEngine.POLLINATIONS_DEEPSEEK -> Icons.Default.Cloud
+                                            AiEngine.POLLINATIONS_MISTRAL -> Icons.Default.AutoAwesome
+                                            AiEngine.POLLINATIONS_LLAMA -> Icons.Default.Psychology
+                                            AiEngine.POLLINATIONS_OPENAI_QWEN -> Icons.Default.AutoAwesome
+                                            AiEngine.KEYLESS_OPEN_REST -> Icons.Default.OfflinePin
                                         },
                                         contentDescription = null,
                                         tint = when (engine) {
-                                            AiEngine.GEMINI_FLASH -> AmberTertiary
-                                            AiEngine.POLLINATIONS_GPT4O -> IndigoPrimary
-                                            AiEngine.POLLINATIONS_CLAUDE -> CyanSecondary
-                                            AiEngine.INSTANT_LOCAL -> EmeraldSuccess
+                                            AiEngine.GEMINI_15_FLASH -> AmberTertiary
+                                            AiEngine.GITHUB_MODELS -> IndigoPrimary
+                                            AiEngine.POLLINATIONS_DEEPSEEK -> CyanSecondary
+                                            AiEngine.POLLINATIONS_MISTRAL -> AmberTertiary
+                                            AiEngine.POLLINATIONS_LLAMA -> CyanSecondary
+                                            AiEngine.POLLINATIONS_OPENAI_QWEN -> MaterialTheme.colorScheme.tertiary
+                                            AiEngine.KEYLESS_OPEN_REST -> EmeraldSuccess
                                         },
                                         modifier = Modifier.size(20.dp)
                                     )
@@ -192,8 +201,9 @@ fun AiEngineSelectionDialog(
                                 Surface(
                                     shape = RoundedCornerShape(6.dp),
                                     color = when (engine) {
-                                        AiEngine.INSTANT_LOCAL -> EmeraldSuccess.copy(alpha = 0.15f)
-                                        AiEngine.GEMINI_FLASH -> AmberTertiary.copy(alpha = 0.15f)
+                                        AiEngine.KEYLESS_OPEN_REST -> EmeraldSuccess.copy(alpha = 0.15f)
+                                        AiEngine.GEMINI_15_FLASH -> AmberTertiary.copy(alpha = 0.15f)
+                                        AiEngine.GITHUB_MODELS -> IndigoPrimary.copy(alpha = 0.15f)
                                         else -> MaterialTheme.colorScheme.surfaceVariant
                                     }
                                 ) {
@@ -204,8 +214,9 @@ fun AiEngineSelectionDialog(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.sp,
                                         color = when (engine) {
-                                            AiEngine.INSTANT_LOCAL -> EmeraldSuccess
-                                            AiEngine.GEMINI_FLASH -> AmberTertiary
+                                            AiEngine.KEYLESS_OPEN_REST -> EmeraldSuccess
+                                            AiEngine.GEMINI_15_FLASH -> AmberTertiary
+                                            AiEngine.GITHUB_MODELS -> IndigoPrimary
                                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                                         }
                                     )

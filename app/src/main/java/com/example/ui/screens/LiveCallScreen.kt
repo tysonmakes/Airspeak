@@ -38,18 +38,24 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.Subtitles
 import androidx.compose.material3.AlertDialog
@@ -363,6 +369,8 @@ fun LiveCallScreen(
                     },
                     selectedTopic = selectedTopic,
                     onSelectTopic = { selectedTopic = it },
+                    currentEngine = currentEngine,
+                    onOpenEngineSelector = { showEngineSelectorDialog = true },
                     onStartCall = { startCall() }
                 )
             }
@@ -391,13 +399,27 @@ fun LiveCallScreen(
                     activeCorrection = activeCorrection,
                     transcriptItems = transcriptItems,
                     showSubtitles = showSubtitles,
+                    currentEngine = currentEngine,
+                    lastTurnLatencyMs = lastTurnLatencyMs,
+                    lastFallbackNotice = lastFallbackNotice,
+                    onOpenEngineSelector = { showEngineSelectorDialog = true },
+                    onCompleteSpeechNow = { speechHelper.completeSpeechNow() },
+                    onInterruptTutor = {
+                        ttsHelper.stop()
+                        isAiSpeaking = false
+                        if (!isMuted) {
+                            speechHelper.startListening(silenceTimeoutMs = 800L) { spoken ->
+                                processUserTurn(spoken)
+                            }
+                        }
+                    },
                     onToggleSubtitles = { showSubtitles = !showSubtitles },
                     onToggleMute = {
                         isMuted = !isMuted
                         if (isMuted) {
                             speechHelper.stopListening()
                         } else if (!isAiSpeaking && !isAiThinking) {
-                            speechHelper.startListening { spoken ->
+                            speechHelper.startListening(silenceTimeoutMs = 800L) { spoken ->
                                 processUserTurn(spoken)
                             }
                         }
@@ -470,6 +492,20 @@ fun LiveCallScreen(
                 onDismiss = { showHintsSheet = false }
             )
         }
+
+        // AI Engine Selection Dialog
+        if (showEngineSelectorDialog) {
+            AiEngineSelectionDialog(
+                currentEngine = currentEngine,
+                aiEngineManager = aiEngineManager,
+                onSelectEngine = { engine ->
+                    aiEngineManager.setEngine(engine)
+                    showEngineSelectorDialog = false
+                    Toast.makeText(context, "Switched to ${engine.displayName}", Toast.LENGTH_SHORT).show()
+                },
+                onDismiss = { showEngineSelectorDialog = false }
+            )
+        }
     }
 }
 
@@ -480,6 +516,8 @@ private fun LobbyView(
     onSelectTutor: (LiveCallTutor) -> Unit,
     selectedTopic: String,
     onSelectTopic: (String) -> Unit,
+    currentEngine: AiEngine,
+    onOpenEngineSelector: () -> Unit,
     onStartCall: () -> Unit
 ) {
     LazyColumn(
@@ -546,6 +584,86 @@ private fun LobbyView(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+            }
+        }
+
+        item {
+            // AI Engine Switcher & Status Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenEngineSelector() }
+                    .testTag("ai_engine_selector_card"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Active AI: ${currentEngine.displayName}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${currentEngine.speedTier} • ${currentEngine.badge} • Tap to switch",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SwapHoriz,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Change",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -838,6 +956,12 @@ private fun ActiveCallView(
     activeCorrection: LiveCallCorrectionItem?,
     transcriptItems: List<LiveCallTranscriptItem>,
     showSubtitles: Boolean,
+    currentEngine: AiEngine,
+    lastTurnLatencyMs: Long,
+    lastFallbackNotice: String?,
+    onOpenEngineSelector: () -> Unit,
+    onCompleteSpeechNow: () -> Unit,
+    onInterruptTutor: () -> Unit,
     onToggleSubtitles: () -> Unit,
     onToggleMute: () -> Unit,
     onTriggerHint: () -> Unit,
@@ -905,7 +1029,43 @@ private fun ActiveCallView(
                 }
             }
 
-            Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Engine & Latency chip (tap to change AI engine anytime during call)
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier
+                        .clickable { onOpenEngineSelector() }
+                        .testTag("in_call_engine_chip")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = if (lastTurnLatencyMs in 1..800 || !currentEngine.isCloud) EmeraldSuccess else AmberTertiary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (lastTurnLatencyMs > 0) "${lastTurnLatencyMs}ms" else currentEngine.speedTier,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = if (lastTurnLatencyMs in 1..800 || !currentEngine.isCloud) EmeraldSuccess else AmberTertiary
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Icon(
+                            imageVector = Icons.Default.SwapHoriz,
+                            contentDescription = "Switch Engine",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+
                 IconButton(onClick = onToggleSubtitles) {
                     Icon(
                         imageVector = if (showSubtitles) Icons.Filled.Subtitles else Icons.Outlined.Subtitles,
@@ -918,6 +1078,36 @@ private fun ActiveCallView(
                         imageVector = Icons.Default.VolumeUp,
                         contentDescription = "Repeat",
                         tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
+        // Active fallback notice if one occurred
+        if (lastFallbackNotice != null) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = AmberTertiary.copy(alpha = 0.15f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = AmberTertiary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = lastFallbackNotice,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -963,8 +1153,8 @@ private fun ActiveCallView(
                 Text(
                     text = when {
                         isAiSpeaking -> "${tutor.name} is speaking..."
-                        isAiThinking -> "Analyzing fluency & preparing reply..."
-                        isListening -> "Listening to you... (Speak freely)"
+                        isAiThinking -> "⚡ ${currentEngine.displayName} replying..."
+                        isListening -> "Listening to you... (Speak naturally)"
                         isMuted -> "Microphone is Muted"
                         else -> "Ready to listen"
                     },
@@ -1102,6 +1292,61 @@ private fun ActiveCallView(
             }
         } else {
             Spacer(modifier = Modifier.weight(1f))
+        }
+
+        // Real-time Dynamic Conversational Action Pill (Zero-lag tap-to-send or interrupt)
+        AnimatedVisibility(visible = isListening && !isMuted) {
+            Button(
+                onClick = onCompleteSpeechNow,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (currentSpeechText.isNotBlank()) EmeraldSuccess else MaterialTheme.colorScheme.primary
+                ),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier
+                    .padding(bottom = 6.dp)
+                    .testTag("send_speech_now_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Send,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = Color.White
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (currentSpeechText.isNotBlank()) "Done Speaking (Send Now ⚡)" else "Listening... (Tap when done)",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+        }
+
+        AnimatedVisibility(visible = isAiSpeaking) {
+            FilledTonalButton(
+                onClick = onInterruptTutor,
+                shape = RoundedCornerShape(24.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = AmberTertiary.copy(alpha = 0.2f),
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                modifier = Modifier
+                    .padding(bottom = 6.dp)
+                    .testTag("interrupt_tutor_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Stop,
+                    contentDescription = null,
+                    tint = AmberTertiary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Interrupt & Talk ✋",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
 
         // In-Call Action Control Bar

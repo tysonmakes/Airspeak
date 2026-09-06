@@ -46,7 +46,9 @@ data class GeminiResponse(
 )
 
 interface GeminiApi {
-    @POST("v1beta/models/gemini-3.5-flash:generateContent")
+    // Engine 1: Official Direct Gemini 1.5 Flash Endpoint
+    // https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=YOUR_GEMINI_API_KEY
+    @POST("v1beta/models/gemini-1.5-flash:generateContent")
     suspend fun generateContent(
         @Query("key") apiKey: String,
         @Body request: GeminiRequest
@@ -61,16 +63,21 @@ interface GeminiApi {
 }
 
 object GeminiClient {
+    // Direct official Gemini 1.5 Flash Endpoint
     private const val BASE_URL = "https://generativelanguage.googleapis.com/"
+
+    // In-memory override for user-configured key from Settings
+    @Volatile
+    var customApiKeyOverride: String? = null
 
     private val okHttpClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
         }
         OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
             .addInterceptor(logging)
             .build()
     }
@@ -90,23 +97,35 @@ object GeminiClient {
             .create(GeminiApi::class.java)
     }
 
+    /**
+     * Resolves the active Gemini API Key:
+     * 1. Manual user override in Settings (if provided)
+     * 2. BuildConfig.GEMINI_API_KEY
+     * 3. YOUR_GEMINI_API_KEY placeholder check
+     */
+    fun getEffectiveApiKey(): String {
+        val custom = customApiKeyOverride?.trim()
+        if (!custom.isNullOrBlank()) return custom
+        return BuildConfig.GEMINI_API_KEY ?: ""
+    }
+
     fun hasValidApiKey(): Boolean {
-        val key = BuildConfig.GEMINI_API_KEY
-        return !key.isNullOrBlank() && key != "MY_GEMINI_API_KEY" && key.length > 10
+        val key = getEffectiveApiKey()
+        return key.isNotBlank() && key != "MY_GEMINI_API_KEY" && key != "YOUR_GEMINI_API_KEY" && key.length > 10
     }
 
     /**
-     * Fast direct query helper for low-latency conversational calling
+     * Fast direct query helper for low-latency conversational calling using Gemini 1.5 Flash
      */
     suspend fun queryGeminiText(
         prompt: String,
         systemInstruction: String? = null,
-        model: String = "gemini-3.5-flash",
+        model: String = "gemini-1.5-flash",
         maxTokens: Int = 180,
         temperature: Float = 0.7f
     ): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         if (!hasValidApiKey()) return@withContext null
-        val apiKey = BuildConfig.GEMINI_API_KEY
+        val apiKey = getEffectiveApiKey()
         try {
             val request = GeminiRequest(
                 contents = listOf(

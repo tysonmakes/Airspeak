@@ -84,12 +84,14 @@ import com.example.data.local.PracticeTopic
 import com.example.data.local.PracticeTopicCatalog
 import com.example.data.local.TopicChatMessage
 import com.example.data.local.entity.WeaknessItem
+import com.example.data.remote.AiEngineManager
 import com.example.data.remote.PollinationsApiService
 import com.example.data.repository.EnglishLearningRepository
 import com.example.ui.components.AudioVisualizerWave
 import com.example.ui.theme.AmberTertiary
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.RoseError
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.launch
 
 @Composable
@@ -441,7 +443,8 @@ private fun ActiveTopicChatSession(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val pollinationsService = remember { PollinationsApiService() }
+    val aiEngineManager = remember { AiEngineManager(context) }
+    val currentEngine by aiEngineManager.currentEngine.collectAsState()
 
     val messages = remember {
         mutableStateListOf(
@@ -483,47 +486,38 @@ private fun ActiveTopicChatSession(
                 "${if (it.sender == CallSender.USER) "Learner" else "Coach Emma"}: ${it.text}"
             }
 
-            // Analyze user grammar & generate reply
-            val turn = pollinationsService.generateLiveCallTurnKeyless(
+            // Analyze user grammar & generate reply using active AI Engine
+            val turn = aiEngineManager.generateLiveCallTurn(
                 tutorName = "Coach Emma",
                 tutorPersona = "Friendly, encouraging English tutor on topic: ${topic.title}",
                 userSpokenText = userText,
                 callTopic = topic.title,
-                conversationHistory = historyString
+                conversationHistory = historyString,
+                targetEngine = currentEngine
             )
 
             isAiGenerating = false
 
-            if (turn != null) {
-                // Update user message with feedback if grammar was imperfect
-                if (!turn.liveCorrection.isNullOrBlank()) {
-                    val index = messages.indexOf(userMsg)
-                    if (index >= 0) {
-                        messages[index] = userMsg.copy(
-                            grammarCorrection = turn.liveCorrection,
-                            grammarReason = turn.livePraise,
-                            betterAlternative = null,
-                            fluencyScore = turn.turnFluencyScore
-                        )
-                    }
+            // Update user message with feedback if grammar was imperfect
+            if (!turn.liveCorrection.isNullOrBlank()) {
+                val index = messages.indexOf(userMsg)
+                if (index >= 0) {
+                    messages[index] = userMsg.copy(
+                        grammarCorrection = turn.liveCorrection,
+                        grammarReason = turn.livePraise,
+                        betterAlternative = null,
+                        fluencyScore = turn.fluencyScore
+                    )
                 }
-
-                // Add AI reply
-                val aiMsg = TopicChatMessage(
-                    sender = CallSender.AI,
-                    text = turn.spokenReply
-                )
-                messages.add(aiMsg)
-                ttsHelper.speak(turn.spokenReply)
-            } else {
-                val fallbackReply = "That's an interesting thought on ${topic.title}! What's another aspect of this you feel strongly about?"
-                val aiMsg = TopicChatMessage(
-                    sender = CallSender.AI,
-                    text = fallbackReply
-                )
-                messages.add(aiMsg)
-                ttsHelper.speak(fallbackReply)
             }
+
+            // Add AI reply
+            val aiMsg = TopicChatMessage(
+                sender = CallSender.AI,
+                text = turn.spokenReply
+            )
+            messages.add(aiMsg)
+            ttsHelper.speak(turn.spokenReply)
 
             listState.animateScrollToItem(messages.size - 1)
         }

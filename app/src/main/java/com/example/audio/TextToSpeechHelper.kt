@@ -28,17 +28,25 @@ class TextToSpeechHelper(context: Context) {
                 tts?.setPitch(1.02f)
 
                 // Select the highest quality natural human voice available on the device
+                // Prioritize Microsoft Edge Neural Voice (en-US-AnaNeural or similar high quality natural voices)
                 try {
                     val voices = tts?.voices
                     if (!voices.isNullOrEmpty()) {
-                        // Look for natural, high-quality, non-network latency voices
+                        // Look for AnaNeural, Edge neural, or highest quality natural non-robotic voice
                         val bestVoice = voices.find { voice ->
+                            voice.name.contains("AnaNeural", ignoreCase = true) ||
+                            voice.name.contains("en-us-ananeural", ignoreCase = true)
+                        } ?: voices.find { voice ->
+                            voice.name.contains("neural", ignoreCase = true) && voice.locale.language == Locale.US.language
+                        } ?: voices.find { voice ->
                             voice.locale.language == Locale.US.language &&
                             !voice.isNetworkConnectionRequired &&
-                            (voice.quality >= android.speech.tts.Voice.QUALITY_HIGH || voice.name.contains("en-us-x", ignoreCase = true))
+                            (voice.quality >= android.speech.tts.Voice.QUALITY_HIGH || voice.name.contains("en-us-x", ignoreCase = true) || voice.name.contains("natural", ignoreCase = true))
                         } ?: voices.find { it.locale == Locale.US }
+
                         if (bestVoice != null) {
                             tts?.voice = bestVoice
+                            Log.d("TextToSpeechHelper", "Selected TTS Voice: ${bestVoice.name}")
                         }
                     }
                 } catch (e: Exception) {

@@ -31,7 +31,7 @@ class SpeechRecognitionHelper(private val context: Context) {
     private var onFinalResultCallback: ((String) -> Unit)? = null
 
     fun startListening(
-        silenceTimeoutMs: Long = 800L,
+        silenceTimeoutMs: Long = 650L,
         onResult: (String) -> Unit
     ) {
         onFinalResultCallback = onResult
@@ -111,8 +111,8 @@ class SpeechRecognitionHelper(private val context: Context) {
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, silenceTimeoutMs)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, silenceTimeoutMs.coerceAtMost(700L))
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 600L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, silenceTimeoutMs.coerceAtMost(550L))
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
             }
 
             speechRecognizer?.startListening(intent)
