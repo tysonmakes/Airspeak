@@ -132,9 +132,12 @@ fun SettingsScreen(
     val latencyResults = remember { mutableStateMapOf<AiEngine, Long>() }
     val isTestingMap = remember { mutableStateMapOf<AiEngine, Boolean>() }
 
-    // Audio & TTS pacing state (Default ~0.88x pacing per blueprint)
+    // Audio & TTS pacing state (Default ~0.90x pacing per blueprint)
     var speechRate by remember {
-        mutableFloatStateOf(settingsPrefs.getFloat("tts_pacing", 0.88f))
+        mutableFloatStateOf(settingsPrefs.getFloat("tts_pacing", 0.90f))
+    }
+    var activeVoiceName by remember {
+        mutableStateOf(settingsPrefs.getString("tts_voice_name", "en-US-AnaNeural") ?: "en-US-AnaNeural")
     }
 
     var showClearMistakesDialog by remember { mutableStateOf(false) }
@@ -581,7 +584,7 @@ fun SettingsScreen(
                                     color = Color.White
                                 )
                                 Text(
-                                    text = "Microsoft Edge Neural Voice (en-US-AnaNeural)",
+                                    text = "Microsoft Edge Neural Voice ($activeVoiceName)",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color(0xFFC77DFF)
                                 )
@@ -591,12 +594,45 @@ fun SettingsScreen(
                                 color = EmeraldSuccess.copy(alpha = 0.15f)
                             ) {
                                 Text(
-                                    text = "Active",
+                                    text = "Edge Neural",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = EmeraldSuccess,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                 )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Voice Name Selector (en-US-AnaNeural vs en-US-JennyNeural)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf("en-US-AnaNeural" to "Ana (Warm & Natural)", "en-US-JennyNeural" to "Jenny (Crisp & Clear)").forEach { (voiceId, label) ->
+                                val isSelected = activeVoiceName == voiceId
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) Color(0xFF2E1C4D) else Color(0xFF1E212B),
+                                    border = BorderStroke(1.dp, if (isSelected) Color(0xFFC77DFF) else Color(0xFF2E3242)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            activeVoiceName = voiceId
+                                            ttsHelper.setVoiceName(voiceId)
+                                            settingsPrefs.edit().putString("tts_voice_name", voiceId).apply()
+                                        }
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) Color(0xFFC77DFF) else Color.White,
+                                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
                             }
                         }
 

@@ -3,6 +3,8 @@ package com.example.audio
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -12,8 +14,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 
+/**
+ * Robust Speech Recognition Helper with Dynamic Voice Activity Detection (VAD).
+ * Features:
+ * - 1.2s dynamic silence threshold so turns trigger naturally without long delays
+ * - Continuous self-healing auto-restart mechanism that eliminates deadlocks
+ * - Prevents SpeechRecognizer busy errors via serialized main-thread lifecycle
+ */
 class SpeechRecognitionHelper(private val context: Context) {
 
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var speechRecognizer: SpeechRecognizer? = null
 
     private val _isListening = MutableStateFlow(false)
@@ -29,16 +39,51 @@ class SpeechRecognitionHelper(private val context: Context) {
     val isAvailable: StateFlow<Boolean> = _isAvailable.asStateFlow()
 
     private var onFinalResultCallback: ((String) -> Unit)? = null
+    private var currentSilenceTimeoutMs: Long = 1200L
+    private var continuousMode: Boolean = false
+
+    // Dynamic VAD timer: triggers dispatch exactly after silence threshold
+    private var vadSilenceRunnable: Runnable? = null
+    private var isDispatching = false
 
     fun startListening(
-        silenceTimeoutMs: Long = 650L,
+        silenceTimeoutMs: Long = 1200L,
+        continuous: Boolean = true,
         onResult: (String) -> Unit
     ) {
+        currentSilenceTimeoutMs = silenceTimeoutMs
+        continuousMode = continuous
         onFinalResultCallback = onResult
         _currentText.value = ""
+        isDispatching = false
+        cancelVadTimer()
 
+        mainHandler.post {
+            safelyStartInternal(silenceTimeoutMs)
+        }
+    }
+
+    private fun cancelVadTimer() {
+        vadSilenceRunnable?.let { mainHandler.removeCallbacks(it) }
+        vadSilenceRunnable = null
+    }
+
+    private fun scheduleVadSilenceDispatch(delayMs: Long) {
+        cancelVadTimer()
+        vadSilenceRunnable = Runnable {
+            val text = _currentText.value.trim()
+            if (text.isNotBlank() && !isDispatching) {
+                isDispatching = true
+                Log.d("SpeechRecognitionHelper", "Dynamic VAD silence threshold reached. Sending speech turn: $text")
+                dispatchFinalResult(text)
+            }
+        }
+        mainHandler.postDelayed(vadSilenceRunnable!!, delayMs)
+    }
+
+    private fun safelyStartInternal(silenceTimeoutMs: Long) {
         try {
-            stopListening()
+            cleanupRecognizer()
 
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
                 setRecognitionListener(object : RecognitionListener {
@@ -48,16 +93,28 @@ class SpeechRecognitionHelper(private val context: Context) {
 
                     override fun onBeginningOfSpeech() {
                         _isListening.value = true
+                        cancelVadTimer()
                     }
 
                     override fun onRmsChanged(rmsdB: Float) {
                         _rmsDb.value = rmsdB.coerceIn(0f, 10f)
+                        // If user is actively producing sound, reset dynamic VAD timer
+                        if (rmsdB > 2.5f) {
+                            cancelVadTimer()
+                        } else if (_currentText.value.isNotBlank() && vadSilenceRunnable == null) {
+                            // User paused after saying something; trigger silence countdown
+                            scheduleVadSilenceDispatch(silenceTimeoutMs)
+                        }
                     }
 
                     override fun onBufferReceived(buffer: ByteArray?) {}
 
                     override fun onEndOfSpeech() {
                         _isListening.value = false
+                        // Once speech ends, schedule dispatch within 300ms if not already triggered
+                        if (_currentText.value.isNotBlank() && !isDispatching) {
+                            scheduleVadSilenceDispatch(300L)
+                        }
                     }
 
                     override fun onError(error: Int) {
@@ -73,11 +130,20 @@ class SpeechRecognitionHelper(private val context: Context) {
                             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Speech timeout"
                             else -> "Recognition error: $error"
                         }
-                        Log.w("SpeechRecognitionHelper", message)
-                        // If we captured partial text before an error or timeout, deliver it!
+                        Log.d("SpeechRecognitionHelper", "Status: $message (code $error)")
+
                         val fallback = _currentText.value.trim()
-                        if (fallback.isNotBlank()) {
-                            onFinalResultCallback?.invoke(fallback)
+                        if (fallback.isNotBlank() && !isDispatching) {
+                            isDispatching = true
+                            dispatchFinalResult(fallback)
+                        } else if (continuousMode && (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_CLIENT)) {
+                            // Self-healing continuous listener: auto-restart immediately without dropping mic
+                            mainHandler.postDelayed({
+                                if (continuousMode && !_isListening.value && !isDispatching) {
+                                    _currentText.value = ""
+                                    safelyStartInternal(currentSilenceTimeoutMs)
+                                }
+                            }, 250L)
                         }
                     }
 
@@ -85,9 +151,18 @@ class SpeechRecognitionHelper(private val context: Context) {
                         _isListening.value = false
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         val text = matches?.firstOrNull() ?: _currentText.value
-                        if (text.isNotBlank()) {
+                        if (text.isNotBlank() && !isDispatching) {
+                            isDispatching = true
                             _currentText.value = text
-                            onFinalResultCallback?.invoke(text)
+                            dispatchFinalResult(text)
+                        } else if (continuousMode) {
+                            // If blank results received in continuous mode, restart loop
+                            mainHandler.postDelayed({
+                                if (continuousMode && !_isListening.value && !isDispatching) {
+                                    _currentText.value = ""
+                                    safelyStartInternal(currentSilenceTimeoutMs)
+                                }
+                            }, 250L)
                         }
                     }
 
@@ -96,6 +171,8 @@ class SpeechRecognitionHelper(private val context: Context) {
                         val text = matches?.firstOrNull()
                         if (!text.isNullOrBlank()) {
                             _currentText.value = text
+                            // User said something new; restart dynamic VAD timer
+                            scheduleVadSilenceDispatch(silenceTimeoutMs)
                         }
                     }
 
@@ -110,9 +187,10 @@ class SpeechRecognitionHelper(private val context: Context) {
                 putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, "en-US")
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                // 1.2s dynamic silence threshold as requested by user
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, silenceTimeoutMs)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, silenceTimeoutMs.coerceAtMost(550L))
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, silenceTimeoutMs)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 300L)
             }
 
             speechRecognizer?.startListening(intent)
@@ -122,24 +200,41 @@ class SpeechRecognitionHelper(private val context: Context) {
         }
     }
 
+    private fun dispatchFinalResult(text: String) {
+        cancelVadTimer()
+        cleanupRecognizer()
+        onFinalResultCallback?.invoke(text)
+    }
+
     /**
-     * Force immediate completion of the current spoken turn (Zero waiting for silence).
+     * Force immediate completion of current spoken turn (Tap-to-Send ⚡).
      */
     fun completeSpeechNow() {
         val text = _currentText.value.trim()
-        stopListening()
-        if (text.isNotBlank()) {
-            onFinalResultCallback?.invoke(text)
+        if (text.isNotBlank() && !isDispatching) {
+            isDispatching = true
+            dispatchFinalResult(text)
+        } else {
+            stopListening()
         }
     }
 
     fun stopListening() {
+        continuousMode = false
+        cancelVadTimer()
+        mainHandler.post {
+            cleanupRecognizer()
+        }
+    }
+
+    private fun cleanupRecognizer() {
         try {
             speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
             speechRecognizer?.destroy()
             speechRecognizer = null
         } catch (e: Exception) {
-            Log.w("SpeechRecognitionHelper", "Error stopping speech recognizer", e)
+            Log.w("SpeechRecognitionHelper", "Error cleaning recognizer: ${e.message}")
         }
         _isListening.value = false
         _rmsDb.value = 0f

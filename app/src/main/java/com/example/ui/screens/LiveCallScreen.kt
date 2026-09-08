@@ -101,6 +101,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.audio.GeminiNativeAudioPlayer
 import com.example.audio.SpeechRecognitionHelper
 import com.example.audio.TextToSpeechHelper
 import com.example.data.local.CallSender
@@ -112,6 +113,9 @@ import com.example.data.local.TutorCatalog
 import com.example.data.local.entity.WeaknessItem
 import com.example.data.remote.AiEngine
 import com.example.data.remote.AiEngineManager
+import com.example.data.remote.GeminiClient
+import com.example.data.remote.GeminiContent
+import com.example.data.remote.GeminiPart
 import com.example.data.remote.PollinationsApiService
 import com.example.data.repository.EnglishLearningRepository
 import com.example.ui.components.AiEngineSelectionDialog
@@ -142,6 +146,7 @@ fun LiveCallScreen(
     val coroutineScope = rememberCoroutineScope()
     val pollinations = remember { PollinationsApiService() }
     val aiEngineManager = remember { AiEngineManager(context) }
+    val geminiNativePlayer = remember { GeminiNativeAudioPlayer(context) }
     val currentEngine by aiEngineManager.currentEngine.collectAsState()
     var showEngineSelectorDialog by remember { mutableStateOf(false) }
     var lastTurnLatencyMs by remember { mutableLongStateOf(0L) }
@@ -213,62 +218,106 @@ fun LiveCallScreen(
                 "${it.sender.name}: ${it.text}"
             }
 
-            val turnResult = aiEngineManager.generateLiveCallTurn(
-                tutorName = selectedTutor.name,
-                tutorPersona = selectedTutor.bio,
-                userSpokenText = clean,
-                callTopic = selectedTopic,
-                conversationHistory = history,
-                targetEngine = currentEngine
-            )
-
-            isAiThinking = false
-            lastTurnLatencyMs = turnResult.latencyMs
-            if (turnResult.wasFallback && turnResult.fallbackReason != null) {
-                lastFallbackNotice = turnResult.fallbackReason
+            // Attempt 1: Direct Gemini Native Voice (sub-second audio streaming)
+            val systemPrompt = "You are ${selectedTutor.name}, ${selectedTutor.bio}. You are speaking in an interactive English speaking call with a learner discussing '${selectedTopic}'. Respond warmly, naturally in 1-2 spoken sentences. Give gentle feedback or keep the dialogue flowing."
+            val conversationHistory = transcriptItems.takeLast(4).map {
+                GeminiContent(
+                    role = if (it.sender == CallSender.USER) "user" else "model",
+                    parts = listOf(GeminiPart(text = it.text))
+                )
             }
 
-            val spokenReply = turnResult.spokenReply
-            val correction = turnResult.liveCorrection
-            val praise = turnResult.livePraise
-
-            if (!correction.isNullOrBlank()) {
-                val corrItem = LiveCallCorrectionItem(
-                    originalSaid = clean,
-                    correctedVersion = correction,
-                    reason = "Live syntax / fluency correction"
+            val nativeResult = if (GeminiClient.hasValidApiKey()) {
+                GeminiClient.queryGeminiNativeVoiceTurn(
+                    userText = clean,
+                    systemInstruction = systemPrompt,
+                    voiceName = selectedTutor.geminiVoiceName,
+                    conversationHistory = conversationHistory
                 )
-                activeCorrection = corrItem
-                sessionCorrections.add(corrItem)
+            } else null
+
+            if (nativeResult != null && nativeResult.audioBytes != null && nativeResult.audioBytes.isNotEmpty()) {
+                // Direct Gemini Native Voice Success!
+                isAiThinking = false
+                lastTurnLatencyMs = nativeResult.latencyMs
+                lastFallbackNotice = null
+
+                val spokenReply = nativeResult.spokenText.ifBlank { "That's great! Let's continue talking about this." }
+                transcriptItems.add(
+                    LiveCallTranscriptItem(
+                        sender = CallSender.AI,
+                        text = spokenReply
+                    )
+                )
+
+                isAiSpeaking = true
+                geminiNativePlayer.playNativeAudio(nativeResult.audioBytes, nativeResult.audioMimeType) {
+                    isAiSpeaking = false
+                    if (callState == CallState.ACTIVE && !isMuted) {
+                        speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { nextSpeech ->
+                            processUserTurn(nextSpeech)
+                        }
+                    }
+                }
             } else {
-                activeCorrection = null
-            }
-
-            latestPraise = praise
-            activeCoachTip = if (!correction.isNullOrBlank()) "💡 $correction" else praise
-
-            transcriptItems.add(
-                LiveCallTranscriptItem(
-                    sender = CallSender.AI,
-                    text = spokenReply,
-                    liveCorrection = correction,
-                    livePraise = praise
+                // Fallback / Multi-Model Engine turn
+                val turnResult = aiEngineManager.generateLiveCallTurn(
+                    tutorName = selectedTutor.name,
+                    tutorPersona = selectedTutor.bio,
+                    userSpokenText = clean,
+                    callTopic = selectedTopic,
+                    conversationHistory = history,
+                    targetEngine = currentEngine
                 )
-            )
 
-            // Speak out the reply with tutor's voice
-            isAiSpeaking = true
-            ttsHelper.setVoiceProfile(
-                locale = selectedTutor.accentLocale,
-                speechRate = selectedTutor.speechRate,
-                pitch = selectedTutor.speechPitch
-            )
-            ttsHelper.speak(spokenReply, utteranceId = "live_call_reply") {
-                isAiSpeaking = false
-                // Auto-listen if not muted with fast 800ms silence threshold
-                if (callState == CallState.ACTIVE && !isMuted) {
-                    speechHelper.startListening(silenceTimeoutMs = 800L) { nextSpeech ->
-                        processUserTurn(nextSpeech)
+                isAiThinking = false
+                lastTurnLatencyMs = turnResult.latencyMs
+                if (turnResult.wasFallback && turnResult.fallbackReason != null) {
+                    lastFallbackNotice = turnResult.fallbackReason
+                }
+
+                val spokenReply = turnResult.spokenReply
+                val correction = turnResult.liveCorrection
+                val praise = turnResult.livePraise
+
+                if (!correction.isNullOrBlank()) {
+                    val corrItem = LiveCallCorrectionItem(
+                        originalSaid = clean,
+                        correctedVersion = correction,
+                        reason = "Live syntax / fluency correction"
+                    )
+                    activeCorrection = corrItem
+                    sessionCorrections.add(corrItem)
+                } else {
+                    activeCorrection = null
+                }
+
+                latestPraise = praise
+                activeCoachTip = if (!correction.isNullOrBlank()) "💡 $correction" else praise
+
+                transcriptItems.add(
+                    LiveCallTranscriptItem(
+                        sender = CallSender.AI,
+                        text = spokenReply,
+                        liveCorrection = correction,
+                        livePraise = praise
+                    )
+                )
+
+                // Speak out the reply with tutor's voice
+                isAiSpeaking = true
+                ttsHelper.setVoiceProfile(
+                    locale = selectedTutor.accentLocale,
+                    speechRate = selectedTutor.speechRate,
+                    pitch = selectedTutor.speechPitch
+                )
+                ttsHelper.speak(spokenReply, utteranceId = "live_call_reply") {
+                    isAiSpeaking = false
+                    // Auto-listen if not muted with continuous self-healing loop
+                    if (callState == CallState.ACTIVE && !isMuted) {
+                        speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { nextSpeech ->
+                            processUserTurn(nextSpeech)
+                        }
                     }
                 }
             }
@@ -288,7 +337,7 @@ fun LiveCallScreen(
         lastTurnLatencyMs = 0L
 
         coroutineScope.launch {
-            delay(1200) // Realistic ringing / connection hand-shake
+            delay(1000) // Fast realistic ringing / connection hand-shake
             callState = CallState.ACTIVE
 
             // Tutor delivers greeting
@@ -300,17 +349,38 @@ fun LiveCallScreen(
                 )
             )
 
-            isAiSpeaking = true
-            ttsHelper.setVoiceProfile(
-                locale = selectedTutor.accentLocale,
-                speechRate = selectedTutor.speechRate,
-                pitch = selectedTutor.speechPitch
-            )
-            ttsHelper.speak(greeting, utteranceId = "live_call_greeting") {
-                isAiSpeaking = false
-                if (!isMuted) {
-                    speechHelper.startListening(silenceTimeoutMs = 800L) { spoken ->
-                        processUserTurn(spoken)
+            // Try Direct Native Voice for greeting
+            val nativeGreeting = if (GeminiClient.hasValidApiKey()) {
+                GeminiClient.queryGeminiNativeVoiceTurn(
+                    userText = "Introduce yourself and say hello to start the call.",
+                    systemInstruction = "You are ${selectedTutor.name}. Greet the user with: '${greeting}' in a natural spoken conversational voice.",
+                    voiceName = selectedTutor.geminiVoiceName
+                )
+            } else null
+
+            if (nativeGreeting?.audioBytes != null && nativeGreeting.audioBytes.isNotEmpty()) {
+                isAiSpeaking = true
+                geminiNativePlayer.playNativeAudio(nativeGreeting.audioBytes, nativeGreeting.audioMimeType) {
+                    isAiSpeaking = false
+                    if (!isMuted) {
+                        speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { spoken ->
+                            processUserTurn(spoken)
+                        }
+                    }
+                }
+            } else {
+                isAiSpeaking = true
+                ttsHelper.setVoiceProfile(
+                    locale = selectedTutor.accentLocale,
+                    speechRate = selectedTutor.speechRate,
+                    pitch = selectedTutor.speechPitch
+                )
+                ttsHelper.speak(greeting, utteranceId = "live_call_greeting") {
+                    isAiSpeaking = false
+                    if (!isMuted) {
+                        speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { spoken ->
+                            processUserTurn(spoken)
+                        }
                     }
                 }
             }
@@ -319,6 +389,7 @@ fun LiveCallScreen(
 
     fun endCall() {
         speechHelper.stopListening()
+        geminiNativePlayer.stop()
         ttsHelper.stop()
         isAiSpeaking = false
         isAiThinking = false
@@ -380,6 +451,7 @@ fun LiveCallScreen(
                     topic = selectedTopic,
                     onCancel = {
                         callState = CallState.IDLE_LOBBY
+                        geminiNativePlayer.stop()
                         ttsHelper.stop()
                     }
                 )
@@ -405,10 +477,11 @@ fun LiveCallScreen(
                     onOpenEngineSelector = { showEngineSelectorDialog = true },
                     onCompleteSpeechNow = { speechHelper.completeSpeechNow() },
                     onInterruptTutor = {
+                        geminiNativePlayer.stop()
                         ttsHelper.stop()
                         isAiSpeaking = false
                         if (!isMuted) {
-                            speechHelper.startListening(silenceTimeoutMs = 800L) { spoken ->
+                            speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { spoken ->
                                 processUserTurn(spoken)
                             }
                         }
@@ -419,7 +492,7 @@ fun LiveCallScreen(
                         if (isMuted) {
                             speechHelper.stopListening()
                         } else if (!isAiSpeaking && !isAiThinking) {
-                            speechHelper.startListening(silenceTimeoutMs = 800L) { spoken ->
+                            speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { spoken ->
                                 processUserTurn(spoken)
                             }
                         }

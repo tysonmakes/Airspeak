@@ -466,7 +466,7 @@ class AiEngineManager(private val context: Context) {
             Persona: $tutorPersona. Topic: $callTopic.
             
             Guidelines:
-            - Keep responses short, natural, and under 25-30 words.
+            - STRICT LIMIT: Maximum 20 words per turn. Spoken reply MUST be 1 brief natural sentence under 20 words.
             - Talk like a real, warm person on a phone call.
             - If learner made an obvious grammar, preposition, or word choice mistake, provide a 1-sentence correction. Else null.
             - Provide 1 brief word of encouragement.
@@ -511,7 +511,7 @@ class AiEngineManager(private val context: Context) {
             return@withContext null
         }
 
-        val systemPrompt = "You are $tutorName, speaking on a phone call. Persona: $tutorPersona. Topic: $callTopic. Keep responses short, natural, and under 25-30 words. Return valid JSON only: {\"spokenReply\":\"...\",\"liveCorrection\":null,\"livePraise\":\"...\"}."
+        val systemPrompt = "You are $tutorName, speaking on a phone call. Persona: $tutorPersona. Topic: $callTopic. STRICT LIMIT: Maximum 20 words per turn. Keep response natural and under 20 words. Return valid JSON only: {\"spokenReply\":\"...\",\"liveCorrection\":null,\"livePraise\":\"...\"}."
         val userPrompt = "History: $conversationHistory\nLearner: $userSpokenText"
 
         try {
@@ -593,7 +593,7 @@ class AiEngineManager(private val context: Context) {
         callTopic: String,
         conversationHistory: String
     ): Triple<String, String?, String?>? = withContext(Dispatchers.IO) {
-        val systemPrompt = "You are $tutorName. Keep responses short, natural, and under 25-30 words. Return JSON only: {\"spokenReply\":\"...\",\"liveCorrection\":null,\"livePraise\":\"...\"}."
+        val systemPrompt = "You are $tutorName. STRICT LIMIT: Maximum 20 words per turn. Keep response natural and under 20 words. Return JSON only: {\"spokenReply\":\"...\",\"liveCorrection\":null,\"livePraise\":\"...\"}."
         val fullPrompt = "$systemPrompt\nTopic: $callTopic\nHistory: $conversationHistory\nLearner: $userSpokenText"
 
         try {

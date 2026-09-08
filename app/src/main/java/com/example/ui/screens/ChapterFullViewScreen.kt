@@ -660,9 +660,36 @@ private fun ListenLessonContent(
     ) {
         Spacer(modifier = Modifier.height(8.dp))
 
+        // Level Badge & Title Header
+        val levelLabel = when {
+            chapter.chapterNumber <= 30 -> "Level 1 • Beginner"
+            chapter.chapterNumber <= 60 -> "Level 2 • Conversational"
+            chapter.chapterNumber <= 80 -> "Level 3 • Intermediate"
+            else -> "Level 4 • Advanced Mastery"
+        }
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFF1E212B),
+            border = BorderStroke(1.dp, Color(0xFF323646))
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "🏆 $levelLabel",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF4CC9F0)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
         // Large Center Tutor Avatar with Dual-Tone Arc Ring (Peach Top + Bronze Bottom)
         Box(
-            modifier = Modifier.size(240.dp),
+            modifier = Modifier.size(220.dp),
             contentAlignment = Alignment.Center
         ) {
             // Animated pulsating wave ring while tutor is speaking
@@ -679,7 +706,7 @@ private fun ListenLessonContent(
                 )
                 Box(
                     modifier = Modifier
-                        .size(236.dp * pulseScale)
+                        .size(216.dp * pulseScale)
                         .clip(CircleShape)
                         .background(Color(0xFFF4CBB2).copy(alpha = 0.12f))
                 )
@@ -688,7 +715,7 @@ private fun ListenLessonContent(
             // Two-tone circular progress/accent arc ring:
             // Top Arc: Peach/cream (#F4CBB2)
             // Bottom Arc: Bronze/taupe (#8C6D58)
-            Canvas(modifier = Modifier.size(236.dp)) {
+            Canvas(modifier = Modifier.size(216.dp)) {
                 val strokeWidth = 7.dp.toPx()
                 val diameter = size.minDimension - strokeWidth
                 val topLeft = Offset(strokeWidth / 2, strokeWidth / 2)
@@ -720,7 +747,7 @@ private fun ListenLessonContent(
             // Tutor portrait image
             Box(
                 modifier = Modifier
-                    .size(212.dp)
+                    .size(194.dp)
                     .clip(CircleShape)
             ) {
                 Image(
@@ -732,35 +759,94 @@ private fun ListenLessonContent(
             }
         }
 
-        // Subtitle & Hinglish Translation Card (Toggleable via 文A)
+        // Subtitle & Hinglish Translation Card (Toggleable via 文A) + Tap-to-Listen Vocabulary Card
         AnimatedVisibility(visible = showSubtitleTranslation) {
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = Color(0xFF181B24).copy(alpha = 0.95f),
-                border = BorderStroke(1.dp, Color(0xFF2C3040)),
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
+                    .padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color(0xFF181B24).copy(alpha = 0.95f),
+                    border = BorderStroke(1.dp, Color(0xFF2C3040)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = "\"${chapter.pronunciationSentence}\"",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 22.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = chapter.hindiTranslation.ifBlank { "Mera naam Alex hai. Tumse milkar khushi hui." },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFFB0B4C4),
-                        textAlign = TextAlign.Center
-                    )
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "\"${chapter.pronunciationSentence}\"",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 22.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = chapter.hindiTranslation.ifBlank { "Mera naam Alex hai. Tumse milkar khushi hui." },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFB0B4C4),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                // Tap-to-Listen Vocabulary Card
+                if (chapter.vocabWord.isNotBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF141720),
+                        border = BorderStroke(1.dp, Color(0xFF262A38)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "🎯 Key Vocab: ",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF8E92A0)
+                                    )
+                                    Text(
+                                        text = chapter.vocabWord,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF4CC9F0)
+                                    )
+                                }
+                                Text(
+                                    text = "${chapter.vocabDefinition} • Ex: \"${chapter.vocabExample}\"",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFFA0A4B4),
+                                    maxLines = 2
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    ttsHelper.speak("${chapter.vocabWord}. ${chapter.vocabExample}")
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.VolumeUp,
+                                    contentDescription = "Listen to vocab",
+                                    tint = Color(0xFF4CC9F0),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

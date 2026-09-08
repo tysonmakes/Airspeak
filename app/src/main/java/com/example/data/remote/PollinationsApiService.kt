@@ -361,21 +361,21 @@ class PollinationsApiService {
         conversationHistory: String,
         modelName: String = "openai"
     ): LiveCallCoachResponse? = withContext(Dispatchers.IO) {
-        val systemPrompt = "You are $tutorName, an expert native English fluency coach on a live voice phone call. Personality: $tutorPersona. Topic: $callTopic. CRITICAL: Keep responses short, natural, conversational, and strictly under 25-30 words so the dialogue flows like a real-time call. Return JSON ONLY."
+        val systemPrompt = "You are $tutorName, an expert native English fluency coach on a live voice phone call. Personality: $tutorPersona. Topic: $callTopic. STRICT LIMIT: Maximum 20 words per turn. Keep response natural, conversational, and under 20 words for sub-second live phone dialogue. Return JSON ONLY."
         val prompt = """
             Recent call transcript:
             $conversationHistory
             
             Learner just said: "$userSpokenText"
             
-            1. Respond naturally as on a live phone call (strictly 1-2 spoken sentences under 25-30 words total).
+            1. Respond naturally as on a live phone call (strictly 1 spoken sentence under 20 words total).
             2. Check if the learner made any grammar, tense, or word choice error. If yes, write a concise correction.
             3. Give 1 live encouragement note.
             4. Rate their turn fluency score (60-100).
             
             Respond with JSON ONLY:
             {
-              "spokenReply": "Short spoken reply under 25-30 words",
+              "spokenReply": "Short spoken reply under 20 words",
               "liveCorrection": "Concise correction or null if fine",
               "livePraise": "Brief praise or encouragement",
               "turnFluencyScore": 88
