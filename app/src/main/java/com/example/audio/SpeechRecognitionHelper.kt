@@ -1,7 +1,9 @@
 package com.example.audio
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -9,17 +11,18 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 
 /**
- * Robust Speech Recognition Helper with Dynamic Voice Activity Detection (VAD).
+ * Robust Speech Recognition Helper with Always-On Continuous Listening (Gemini Live Style).
  * Features:
- * - 1.2s dynamic silence threshold so turns trigger naturally without long delays
- * - Continuous self-healing auto-restart mechanism that eliminates deadlocks
- * - Prevents SpeechRecognizer busy errors via serialized main-thread lifecycle
+ * - Dynamic Voice Activity Detection (VAD) with silence countdown
+ * - Continuous self-healing auto-restart mechanism that never drops the mic
+ * - Graceful permission checking & error recovery
  */
 class SpeechRecognitionHelper(private val context: Context) {
 
@@ -40,11 +43,18 @@ class SpeechRecognitionHelper(private val context: Context) {
 
     private var onFinalResultCallback: ((String) -> Unit)? = null
     private var currentSilenceTimeoutMs: Long = 1200L
-    private var continuousMode: Boolean = false
+    private var continuousMode: Boolean = true
 
     // Dynamic VAD timer: triggers dispatch exactly after silence threshold
     private var vadSilenceRunnable: Runnable? = null
     private var isDispatching = false
+
+    fun hasRecordPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+    }
 
     fun startListening(
         silenceTimeoutMs: Long = 1200L,
@@ -74,7 +84,7 @@ class SpeechRecognitionHelper(private val context: Context) {
             val text = _currentText.value.trim()
             if (text.isNotBlank() && !isDispatching) {
                 isDispatching = true
-                Log.d("SpeechRecognitionHelper", "Dynamic VAD silence threshold reached. Sending speech turn: $text")
+                Log.d("SpeechRecognitionHelper", "Silence reached. Auto-sending: $text")
                 dispatchFinalResult(text)
             }
         }
@@ -82,6 +92,12 @@ class SpeechRecognitionHelper(private val context: Context) {
     }
 
     private fun safelyStartInternal(silenceTimeoutMs: Long) {
+        if (!hasRecordPermission()) {
+            Log.w("SpeechRecognitionHelper", "RECORD_AUDIO permission not granted")
+            _isListening.value = false
+            return
+        }
+
         try {
             cleanupRecognizer()
 
@@ -99,7 +115,7 @@ class SpeechRecognitionHelper(private val context: Context) {
                     override fun onRmsChanged(rmsdB: Float) {
                         _rmsDb.value = rmsdB.coerceIn(0f, 10f)
                         // If user is actively producing sound, reset dynamic VAD timer
-                        if (rmsdB > 2.5f) {
+                        if (rmsdB > 2.2f) {
                             cancelVadTimer()
                         } else if (_currentText.value.isNotBlank() && vadSilenceRunnable == null) {
                             // User paused after saying something; trigger silence countdown
@@ -110,10 +126,9 @@ class SpeechRecognitionHelper(private val context: Context) {
                     override fun onBufferReceived(buffer: ByteArray?) {}
 
                     override fun onEndOfSpeech() {
-                        _isListening.value = false
-                        // Once speech ends, schedule dispatch within 300ms if not already triggered
+                        // Once speech pauses, schedule dispatch within 350ms if speech was detected
                         if (_currentText.value.isNotBlank() && !isDispatching) {
-                            scheduleVadSilenceDispatch(300L)
+                            scheduleVadSilenceDispatch(350L)
                         }
                     }
 
@@ -121,14 +136,14 @@ class SpeechRecognitionHelper(private val context: Context) {
                         _isListening.value = false
                         val message = when (error) {
                             SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
-                            SpeechRecognizer.ERROR_CLIENT -> "Client side error"
+                            SpeechRecognizer.ERROR_CLIENT -> "Client error"
                             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required"
-                            SpeechRecognizer.ERROR_NETWORK -> "Network connection error"
+                            SpeechRecognizer.ERROR_NETWORK -> "Network error"
                             SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected"
                             SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognizer busy"
                             SpeechRecognizer.ERROR_SERVER -> "Speech server error"
                             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Speech timeout"
-                            else -> "Recognition error: $error"
+                            else -> "Recognition code: $error"
                         }
                         Log.d("SpeechRecognitionHelper", "Status: $message (code $error)")
 
@@ -136,14 +151,14 @@ class SpeechRecognitionHelper(private val context: Context) {
                         if (fallback.isNotBlank() && !isDispatching) {
                             isDispatching = true
                             dispatchFinalResult(fallback)
-                        } else if (continuousMode && (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_CLIENT)) {
-                            // Self-healing continuous listener: auto-restart immediately without dropping mic
+                        } else if (continuousMode && error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                            // Self-healing continuous listener: restart loop smoothly
                             mainHandler.postDelayed({
-                                if (continuousMode && !_isListening.value && !isDispatching) {
+                                if (continuousMode && !isDispatching) {
                                     _currentText.value = ""
                                     safelyStartInternal(currentSilenceTimeoutMs)
                                 }
-                            }, 250L)
+                            }, 300L)
                         }
                     }
 
@@ -156,13 +171,13 @@ class SpeechRecognitionHelper(private val context: Context) {
                             _currentText.value = text
                             dispatchFinalResult(text)
                         } else if (continuousMode) {
-                            // If blank results received in continuous mode, restart loop
+                            // Restart loop seamlessly if continuous
                             mainHandler.postDelayed({
-                                if (continuousMode && !_isListening.value && !isDispatching) {
+                                if (continuousMode && !isDispatching) {
                                     _currentText.value = ""
                                     safelyStartInternal(currentSilenceTimeoutMs)
                                 }
-                            }, 250L)
+                            }, 200L)
                         }
                     }
 
@@ -187,13 +202,13 @@ class SpeechRecognitionHelper(private val context: Context) {
                 putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, "en-US")
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                // 1.2s dynamic silence threshold as requested by user
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, silenceTimeoutMs)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, silenceTimeoutMs)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 300L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 250L)
             }
 
             speechRecognizer?.startListening(intent)
+            _isListening.value = true
         } catch (e: Exception) {
             Log.e("SpeechRecognitionHelper", "Failed to start speech recognition", e)
             _isListening.value = false

@@ -23,6 +23,28 @@ data class LiveCallTutor(
 object TutorCatalog {
     val tutors = listOf(
         LiveCallTutor(
+            id = "tutor_gemini",
+            name = "Gemini 2.5 Live",
+            roleTitle = "Google AI Conversational Intelligence",
+            origin = "Google AI Studio",
+            avatarRes = R.drawable.img_tutor_emma_1788578908516,
+            accentLocale = Locale.US,
+            speechPitch = 1.0f,
+            speechRate = 1.0f,
+            geminiVoiceName = "Aoede",
+            edgeVoiceName = "en-US-AnaNeural",
+            greeting = "Hello! I am Gemini 2.5 Live, powered directly by Google's native conversational intelligence. What topic shall we explore together today?",
+            bio = "Official Google Gemini 2.5 Flash direct live conversational agent. Speaks with high-clarity native neural voice, adapts dynamically to any topic, and provides intelligent instant corrections.",
+            specialties = listOf("Direct Gemini Intelligence", "Adaptive Free Flow", "Instant Grammar Mastery"),
+            defaultTopics = listOf(
+                "Open Casual Conversation",
+                "Advanced English Vocabulary",
+                "Tech & Artificial Intelligence",
+                "Daily English Fluency Drill",
+                "Philosophy & Deep Discussions"
+            )
+        ),
+        LiveCallTutor(
             id = "tutor_emma",
             name = "Emma Watson",
             roleTitle = "Friendly Native Speaker",

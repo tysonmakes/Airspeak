@@ -147,6 +147,40 @@ object GeminiClient {
             .create(GeminiApi::class.java)
     }
 
+    data class KeyTestResult(
+        val isSuccess: Boolean,
+        val message: String,
+        val latencyMs: Long = 0
+    )
+
+    suspend fun testApiKey(candidateKey: String? = null): KeyTestResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val key = candidateKey?.trim()?.ifBlank { null } ?: getEffectiveApiKey()
+        if (key.isBlank() || key == "MY_GEMINI_API_KEY" || key == "YOUR_GEMINI_API_KEY" || key.length < 10) {
+            return@withContext KeyTestResult(false, "API Key is empty or placeholder.")
+        }
+        val startTime = System.currentTimeMillis()
+        try {
+            val testRequest = GeminiRequest(
+                contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Respond with one word: READY")))),
+                generationConfig = GeminiGenerationConfig(maxOutputTokens = 10, temperature = 0.1f)
+            )
+            val response = api.generateContentDynamic("gemini-2.5-flash", key, testRequest)
+            val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
+            val latency = System.currentTimeMillis() - startTime
+            if (!text.isNullOrBlank()) {
+                isQuotaExceeded = false
+                lastQuotaErrorMessage = null
+                return@withContext KeyTestResult(true, "Gemini 2.5 Flash active ($text)", latency)
+            } else {
+                return@withContext KeyTestResult(false, "No text returned by Gemini.")
+            }
+        } catch (e: Exception) {
+            checkAndRecordQuotaException(e)
+            val msg = e.message ?: "Network or Auth Error"
+            return@withContext KeyTestResult(false, "Error: $msg")
+        }
+    }
+
     /**
      * Resolves the active Gemini API Key:
      * 1. Manual user override in Settings (if provided)

@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -45,6 +48,7 @@ import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -71,6 +75,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -152,6 +157,16 @@ fun LiveCallScreen(
     var lastTurnLatencyMs by remember { mutableLongStateOf(0L) }
     var lastFallbackNotice by remember { mutableStateOf<String?>(null) }
 
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Toast.makeText(context, "Microphone enabled for Live Voice Call!", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Microphone permission needed for voice. You can also use Keyboard.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     var selectedTutor by remember { mutableStateOf(TutorCatalog.tutors.first()) }
     var selectedTopic by remember { mutableStateOf(selectedTutor.defaultTopics.first()) }
     var callState by remember { mutableStateOf(CallState.IDLE_LOBBY) }
@@ -161,6 +176,8 @@ fun LiveCallScreen(
     var isMuted by remember { mutableStateOf(false) }
     var showSubtitles by remember { mutableStateOf(true) }
     var showHintsSheet by remember { mutableStateOf(false) }
+    var showKeyboardInputDialog by remember { mutableStateOf(false) }
+    var typedTurnInput by remember { mutableStateOf("") }
     var isAiSpeaking by remember { mutableStateOf(false) }
     var isAiThinking by remember { mutableStateOf(false) }
 
@@ -194,6 +211,12 @@ fun LiveCallScreen(
     fun processUserTurn(userText: String) {
         if (userText.isBlank()) return
         val clean = userText.trim()
+
+        // If AI was speaking, immediately interrupt and stop playback
+        ttsHelper.stop()
+        geminiNativePlayer.stop()
+        isAiSpeaking = false
+
         val words = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
         totalWordsSpoken += words.size
 
@@ -326,6 +349,10 @@ fun LiveCallScreen(
     }
 
     fun startCall() {
+        if (!speechHelper.hasRecordPermission()) {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+
         callState = CallState.CONNECTING
         transcriptItems.clear()
         sessionCorrections.clear()
@@ -363,8 +390,8 @@ fun LiveCallScreen(
                 isAiSpeaking = true
                 geminiNativePlayer.playNativeAudio(nativeGreeting.audioBytes, nativeGreeting.audioMimeType) {
                     isAiSpeaking = false
-                    if (!isMuted) {
-                        speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { spoken ->
+                    if (callState == CallState.ACTIVE && !isMuted) {
+                        speechHelper.startListening(silenceTimeoutMs = 1200L, continuous = true) { spoken ->
                             processUserTurn(spoken)
                         }
                     }
@@ -379,8 +406,8 @@ fun LiveCallScreen(
                 )
                 ttsHelper.speak(greeting, utteranceId = "live_call_greeting") {
                     isAiSpeaking = false
-                    if (!isMuted) {
-                        speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { spoken ->
+                    if (callState == CallState.ACTIVE && !isMuted) {
+                        speechHelper.startListening(silenceTimeoutMs = 1200L, continuous = true) { spoken ->
                             processUserTurn(spoken)
                         }
                     }
@@ -500,6 +527,7 @@ fun LiveCallScreen(
                         }
                     },
                     onTriggerHint = { showHintsSheet = true },
+                    onOpenKeyboardInput = { showKeyboardInputDialog = true },
                     onRepeatTutor = {
                         val lastAiMsg = transcriptItems.lastOrNull { it.sender == CallSender.AI }?.text
                         if (!lastAiMsg.isNullOrBlank()) {
@@ -554,6 +582,67 @@ fun LiveCallScreen(
                     )
                 }
             }
+        }
+
+        // Live Call Keyboard Input Fallback Dialog
+        if (showKeyboardInputDialog) {
+            AlertDialog(
+                onDismissRequest = { showKeyboardInputDialog = false },
+                title = {
+                    Text(
+                        text = "Type to ${selectedTutor.name}",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Column {
+                        Text(
+                            text = "Speak or type in English — ${selectedTutor.name} will answer with live spoken voice.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = typedTurnInput,
+                            onValueChange = { typedTurnInput = it },
+                            placeholder = { Text("Type what you want to say in English...", color = Color.Gray) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("live_call_text_input"),
+                            singleLine = false,
+                            maxLines = 4
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val text = typedTurnInput.trim()
+                            if (text.isNotBlank()) {
+                                showKeyboardInputDialog = false
+                                typedTurnInput = ""
+                                processUserTurn(text)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Send,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Send & Speak")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showKeyboardInputDialog = false }) {
+                        Text("Cancel", color = Color.White)
+                    }
+                },
+                containerColor = Color(0xFF1B1D28)
+            )
         }
 
         // Hints Dialog
@@ -1040,6 +1129,7 @@ private fun ActiveCallView(
     onToggleSubtitles: () -> Unit,
     onToggleMute: () -> Unit,
     onTriggerHint: () -> Unit,
+    onOpenKeyboardInput: () -> Unit,
     onRepeatTutor: () -> Unit,
     onSaveCorrection: (LiveCallCorrectionItem) -> Unit,
     onEndCall: () -> Unit
@@ -1444,6 +1534,22 @@ private fun ActiveCallView(
                     imageVector = Icons.Default.Lightbulb,
                     contentDescription = "Sentence Hints",
                     tint = AmberTertiary
+                )
+            }
+
+            // Keyboard / Type Input
+            IconButton(
+                onClick = onOpenKeyboardInput,
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .testTag("live_call_keyboard_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Keyboard,
+                    contentDescription = "Type text to AI",
+                    tint = MaterialTheme.colorScheme.onSurface
                 )
             }
 

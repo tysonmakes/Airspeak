@@ -146,8 +146,37 @@ class EdgeTtsHelper(private val context: Context) {
             return@withContext cachedFile
         }
 
+        // Tier 1: High-Clarity Studio Neural Stream (Amazon Polly / StreamElements Studio Voice)
         try {
-            // FreeTTS Edge Neural TTS REST Proxy
+            val pollyVoice = when {
+                voiceName.contains("Ryan", ignoreCase = true) || voiceName.contains("Arthur", ignoreCase = true) || voiceName.contains("GB", ignoreCase = true) -> "Brian"
+                voiceName.contains("Guy", ignoreCase = true) || voiceName.contains("David", ignoreCase = true) -> "Joey"
+                voiceName.contains("Sophia", ignoreCase = true) || voiceName.contains("Nicole", ignoreCase = true) || voiceName.contains("AU", ignoreCase = true) -> "Nicole"
+                voiceName.contains("Jenny", ignoreCase = true) -> "Kendra"
+                else -> "Joanna"
+            }
+            val encoded = java.net.URLEncoder.encode(text, "UTF-8")
+            val pollyUrl = "https://api.streamelements.com/kappa/v2/speech?voice=$pollyVoice&text=$encoded"
+            val pollyReq = Request.Builder()
+                .url(pollyUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .build()
+
+            val pollyResp = httpClient.newCall(pollyReq).execute()
+            if (pollyResp.isSuccessful) {
+                val bytes = pollyResp.body?.bytes()
+                if (bytes != null && bytes.isNotEmpty()) {
+                    FileOutputStream(cachedFile).use { fos -> fos.write(bytes) }
+                    prefetchCache[key] = cachedFile
+                    return@withContext cachedFile
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("EdgeTtsHelper", "Polly Neural stream note: ${e.message}")
+        }
+
+        // Tier 2: FreeTTS Edge Neural TTS REST Proxy
+        try {
             val payload = JSONObject().apply {
                 put("text", text)
                 put("voice", voiceName)

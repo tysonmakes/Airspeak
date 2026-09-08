@@ -127,6 +127,8 @@ fun SettingsScreen(
     var githubTokenInput by remember { mutableStateOf(aiEngineManager.getCustomGitHubToken()) }
     var showGeminiKey by remember { mutableStateOf(false) }
     var showGithubToken by remember { mutableStateOf(false) }
+    var isTestingGeminiKey by remember { mutableStateOf(false) }
+    var geminiKeyTestResult by remember { mutableStateOf<GeminiClient.KeyTestResult?>(null) }
 
     // Latency testing states
     val latencyResults = remember { mutableStateMapOf<AiEngine, Long>() }
@@ -479,15 +481,96 @@ fun SettingsScreen(
                                 Text("Save Key")
                             }
 
+                            Button(
+                                onClick = {
+                                    isTestingGeminiKey = true
+                                    geminiKeyTestResult = null
+                                    coroutineScope.launch {
+                                        val res = GeminiClient.testApiKey(geminiKeyInput)
+                                        geminiKeyTestResult = res
+                                        isTestingGeminiKey = false
+                                        if (res.isSuccess) {
+                                            aiEngineManager.setCustomGeminiKey(geminiKeyInput)
+                                        }
+                                    }
+                                },
+                                enabled = !isTestingGeminiKey,
+                                modifier = Modifier
+                                    .weight(1.3f)
+                                    .testTag("test_gemini_key_btn"),
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                if (isTestingGeminiKey) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Testing...", fontSize = 12.sp)
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Test & Verify", fontSize = 12.sp)
+                                }
+                            }
+
                             OutlinedButton(
                                 onClick = {
                                     geminiKeyInput = ""
+                                    geminiKeyTestResult = null
                                     aiEngineManager.setCustomGeminiKey("")
                                     Toast.makeText(context, "Custom key cleared", Toast.LENGTH_SHORT).show()
                                 },
                                 shape = RoundedCornerShape(10.dp)
                             ) {
                                 Text("Clear", color = Color.White)
+                            }
+                        }
+
+                        // Real-time verification result feedback banner
+                        geminiKeyTestResult?.let { res ->
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (res.isSuccess) EmeraldSuccess.copy(alpha = 0.15f) else Color(0xFFFF4D4F).copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (res.isSuccess) EmeraldSuccess else Color(0xFFFF4D4F)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (res.isSuccess) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = if (res.isSuccess) EmeraldSuccess else Color(0xFFFF4D4F),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = if (res.isSuccess) "✅ Gemini Key Active & Verified!" else "❌ Gemini Verification Failed",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (res.isSuccess) EmeraldSuccess else Color(0xFFFF4D4F)
+                                        )
+                                        Text(
+                                            text = "${res.message}${if (res.latencyMs > 0) " • Latency: ${res.latencyMs}ms" else ""}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White.copy(alpha = 0.85f)
+                                        )
+                                    }
+                                }
                             }
                         }
 
