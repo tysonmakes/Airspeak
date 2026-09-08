@@ -36,7 +36,7 @@ enum class AiEngine(
     val description: String,
     val isCloud: Boolean
 ) {
-    GEMINI_15_FLASH(
+    GEMINI_25_FLASH(
         id = "gemini_25_flash",
         displayName = "Gemini 2.5 Flash (Best Free Tier)",
         provider = "Google Cloud AI",
@@ -185,7 +185,7 @@ data class LiveCallTurnResult(
 data class QuotaAlertEvent(
     val title: String = "⚠️ AI Model Limit Reached",
     val message: String,
-    val failedEngine: AiEngine = AiEngine.GEMINI_15_FLASH,
+    val failedEngine: AiEngine = AiEngine.GEMINI_25_FLASH,
     val activeBackupEngine: AiEngine = AiEngine.POLLINATIONS_DEEPSEEK,
     val isDailyQuotaExceeded: Boolean = true
 )
@@ -242,8 +242,8 @@ class AiEngineManager(private val context: Context) {
 
     private fun resolveActiveEngine(mode: AiRoutingMode): AiEngine {
         return when (mode) {
-            AiRoutingMode.AUTO -> AiEngine.GEMINI_15_FLASH
-            AiRoutingMode.GEMINI_ONLY -> AiEngine.GEMINI_15_FLASH
+            AiRoutingMode.AUTO -> AiEngine.GEMINI_25_FLASH
+            AiRoutingMode.GEMINI_ONLY -> AiEngine.GEMINI_25_FLASH
             AiRoutingMode.GITHUB_MODELS_ONLY -> AiEngine.GITHUB_MODELS
             AiRoutingMode.DEEPSEEK_ONLY -> AiEngine.POLLINATIONS_DEEPSEEK
             AiRoutingMode.MISTRAL_ONLY -> AiEngine.POLLINATIONS_MISTRAL
@@ -262,7 +262,7 @@ class AiEngineManager(private val context: Context) {
     // Direct manual engine selector override
     fun setEngine(engine: AiEngine) {
         val mappedMode = when (engine) {
-            AiEngine.GEMINI_15_FLASH -> AiRoutingMode.GEMINI_ONLY
+            AiEngine.GEMINI_25_FLASH -> AiRoutingMode.GEMINI_ONLY
             AiEngine.GITHUB_MODELS -> AiRoutingMode.GITHUB_MODELS_ONLY
             AiEngine.POLLINATIONS_DEEPSEEK -> AiRoutingMode.DEEPSEEK_ONLY
             AiEngine.POLLINATIONS_MISTRAL -> AiRoutingMode.MISTRAL_ONLY
@@ -356,7 +356,7 @@ class AiEngineManager(private val context: Context) {
                     spokenReply = geminiResult.first,
                     liveCorrection = geminiResult.second,
                     livePraise = geminiResult.third,
-                    usedEngine = AiEngine.GEMINI_15_FLASH,
+                    usedEngine = AiEngine.GEMINI_25_FLASH,
                     latencyMs = latency
                 )
             }
@@ -364,7 +364,7 @@ class AiEngineManager(private val context: Context) {
                 _quotaAlert.value = QuotaAlertEvent(
                     title = "⚠️ Gemini Daily Quota / Rate Limit Reached",
                     message = "Aapki Gemini API limit (1500 req/day ya 15 req/min) reach ho gayi hai. App automatically DeepSeek-V3 / Free Backup Engine par switch ho gayi hai taaki aapka flow na ruke!",
-                    failedEngine = AiEngine.GEMINI_15_FLASH,
+                    failedEngine = AiEngine.GEMINI_25_FLASH,
                     activeBackupEngine = AiEngine.POLLINATIONS_DEEPSEEK
                 )
             }
@@ -449,7 +449,7 @@ class AiEngineManager(private val context: Context) {
     ): Triple<String, String?, String?>? {
         return withTimeoutOrNull(timeoutMs) {
             when (engine) {
-                AiEngine.GEMINI_15_FLASH -> tryGeminiLiveTurn(tutorName, tutorPersona, userSpokenText, callTopic, conversationHistory)
+                AiEngine.GEMINI_25_FLASH -> tryGeminiLiveTurn(tutorName, tutorPersona, userSpokenText, callTopic, conversationHistory)
                 AiEngine.GITHUB_MODELS -> tryGitHubModelsTurn(tutorName, tutorPersona, userSpokenText, callTopic, conversationHistory)
                 AiEngine.POLLINATIONS_DEEPSEEK -> {
                     val res = tryPollinationsLiveTurn(tutorName, tutorPersona, userSpokenText, callTopic, conversationHistory, "deepseek")
@@ -783,11 +783,11 @@ class AiEngineManager(private val context: Context) {
         val start = System.currentTimeMillis()
         try {
             when (engine) {
-                AiEngine.GEMINI_15_FLASH -> {
+                AiEngine.GEMINI_25_FLASH -> {
                     if (!GeminiClient.hasValidApiKey()) return@withContext -1L
                     GeminiClient.queryGeminiText(
                         prompt = "Reply OK",
-                        model = "gemini-1.5-flash",
+                        model = "gemini-2.5-flash",
                         maxTokens = 10
                     )
                 }

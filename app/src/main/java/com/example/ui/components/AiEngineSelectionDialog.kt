@@ -143,7 +143,7 @@ fun AiEngineSelectionDialog(
                                 ) {
                                     Icon(
                                         imageVector = when (engine) {
-                                            AiEngine.GEMINI_15_FLASH -> Icons.Default.Bolt
+                                            AiEngine.GEMINI_25_FLASH -> Icons.Default.Bolt
                                             AiEngine.GITHUB_MODELS -> Icons.Default.Psychology
                                             AiEngine.POLLINATIONS_DEEPSEEK -> Icons.Default.Cloud
                                             AiEngine.POLLINATIONS_MISTRAL -> Icons.Default.AutoAwesome
@@ -153,7 +153,7 @@ fun AiEngineSelectionDialog(
                                         },
                                         contentDescription = null,
                                         tint = when (engine) {
-                                            AiEngine.GEMINI_15_FLASH -> AmberTertiary
+                                            AiEngine.GEMINI_25_FLASH -> AmberTertiary
                                             AiEngine.GITHUB_MODELS -> IndigoPrimary
                                             AiEngine.POLLINATIONS_DEEPSEEK -> CyanSecondary
                                             AiEngine.POLLINATIONS_MISTRAL -> AmberTertiary
@@ -202,7 +202,7 @@ fun AiEngineSelectionDialog(
                                     shape = RoundedCornerShape(6.dp),
                                     color = when (engine) {
                                         AiEngine.KEYLESS_OPEN_REST -> EmeraldSuccess.copy(alpha = 0.15f)
-                                        AiEngine.GEMINI_15_FLASH -> AmberTertiary.copy(alpha = 0.15f)
+                                        AiEngine.GEMINI_25_FLASH -> AmberTertiary.copy(alpha = 0.15f)
                                         AiEngine.GITHUB_MODELS -> IndigoPrimary.copy(alpha = 0.15f)
                                         else -> MaterialTheme.colorScheme.surfaceVariant
                                     }
@@ -215,7 +215,7 @@ fun AiEngineSelectionDialog(
                                         fontSize = 10.sp,
                                         color = when (engine) {
                                             AiEngine.KEYLESS_OPEN_REST -> EmeraldSuccess
-                                            AiEngine.GEMINI_15_FLASH -> AmberTertiary
+                                            AiEngine.GEMINI_25_FLASH -> AmberTertiary
                                             AiEngine.GITHUB_MODELS -> IndigoPrimary
                                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                                         }
