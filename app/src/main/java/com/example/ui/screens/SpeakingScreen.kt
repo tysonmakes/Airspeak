@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
@@ -40,6 +41,9 @@ import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.ui.components.NativeNaturalizerView
+import com.example.ui.components.PronunciationLabView
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -91,6 +95,12 @@ import com.example.ui.theme.RoseError
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+enum class SpeakingSubTab(val title: String, val icon: ImageVector) {
+    FLUENCY("Fluency & Pace", Icons.Default.Mic),
+    PRONUNCIATION("Pronunciation Lab", Icons.Default.Psychology),
+    NATURALIZER("Native Naturalizer", Icons.Default.AutoAwesome)
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SpeakingScreen(
@@ -103,6 +113,7 @@ fun SpeakingScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+    var activeSubTab by remember { mutableStateOf(SpeakingSubTab.FLUENCY) }
     var selectedTopic by remember { mutableStateOf(DefaultData.speakingTopics.first()) }
     var isRecording by remember { mutableStateOf(false) }
     var recordingSeconds by remember { mutableIntStateOf(0) }
@@ -207,9 +218,70 @@ fun SpeakingScreen(
             }
         }
 
-        // Topic Carousel
+        // Interactive Mode Switcher
         item {
-            Text(
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    SpeakingSubTab.entries.forEach { tab ->
+                        val isSelected = activeSubTab == tab
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { activeSubTab = tab }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 10.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = tab.icon,
+                                    contentDescription = null,
+                                    tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = tab.title,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (activeSubTab == SpeakingSubTab.PRONUNCIATION) {
+            item {
+                PronunciationLabView(
+                    repository = repository,
+                    ttsHelper = ttsHelper,
+                    speechHelper = speechHelper
+                )
+            }
+        } else if (activeSubTab == SpeakingSubTab.NATURALIZER) {
+            item {
+                NativeNaturalizerView(
+                    ttsHelper = ttsHelper,
+                    speechHelper = speechHelper
+                )
+            }
+        } else {
+            // Topic Carousel
+            item {
+                Text(
                 text = "Choose a Speaking Prompt",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
@@ -957,6 +1029,7 @@ fun SpeakingScreen(
             }
         }
     }
+}
 }
 
 private fun startSpeechRecording(

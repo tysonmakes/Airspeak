@@ -18,7 +18,7 @@ class TextToSpeechHelper(context: Context) {
     val isSpeaking: StateFlow<Boolean> = edgeTts.isSpeaking
 
     private var currentSpeechRate: Float = 1.0f
-    private var currentVoiceName: String = "en-US-AnaNeural"
+    private var currentVoiceName: String = "en-US-JennyNeural"
 
     init {
         edgeTts.voiceName = currentVoiceName

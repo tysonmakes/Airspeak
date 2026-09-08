@@ -99,6 +99,7 @@ class EdgeTtsHelper(private val context: Context) {
                 if (status == TextToSpeech.SUCCESS) {
                     localTts?.language = Locale.US
                     localTts?.setSpeechRate(speechRate)
+                    configureBestLocalVoice()
                     isLocalTtsReady = true
 
                     localTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -118,6 +119,33 @@ class EdgeTtsHelper(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.w("EdgeTtsHelper", "Fallback TTS init note: ${e.message}")
+        }
+    }
+
+    private fun configureBestLocalVoice() {
+        try {
+            val tts = localTts ?: return
+            val voices = tts.voices
+            if (!voices.isNullOrEmpty()) {
+                val englishVoices = voices.filter { it.locale.language.equals("en", ignoreCase = true) }
+                val bestVoice = englishVoices.firstOrNull { voice ->
+                    val name = voice.name.lowercase()
+                    (voice.quality == android.speech.tts.Voice.QUALITY_VERY_HIGH || voice.quality == android.speech.tts.Voice.QUALITY_HIGH) &&
+                    (name.contains("neural") || name.contains("natural") || name.contains("x-sfg") || name.contains("x-tpd"))
+                } ?: englishVoices.firstOrNull { voice ->
+                    voice.quality >= android.speech.tts.Voice.QUALITY_HIGH
+                } ?: englishVoices.firstOrNull { voice ->
+                    val name = voice.name.lowercase()
+                    !name.contains("robot") && !name.contains("low")
+                } ?: englishVoices.firstOrNull()
+
+                if (bestVoice != null) {
+                    tts.voice = bestVoice
+                    Log.d("EdgeTtsHelper", "Configured natural local voice: ${bestVoice.name}")
+                }
+            }
+        } catch (e: Throwable) {
+            Log.w("EdgeTtsHelper", "Local voice config note: ${e.message}")
         }
     }
 
@@ -155,10 +183,9 @@ class EdgeTtsHelper(private val context: Context) {
 
     private fun generateSecMsGec(): String {
         val winEpoch = 11644473600L
-        val ticks = System.currentTimeMillis() / 1000.0
-        var windowsTicks = ticks + winEpoch
-        windowsTicks -= windowsTicks % 300
-        val finalTicks = (windowsTicks * 10000000.0).toLong()
+        val seconds = (System.currentTimeMillis() / 1000L) + winEpoch
+        val roundedSeconds = seconds - (seconds % 300L)
+        val finalTicks = roundedSeconds * 10000000L
         val strToHash = "${finalTicks}6A5AA1D4EAFF4E9FB37E23D68491D6F4"
         return try {
             val md = java.security.MessageDigest.getInstance("SHA-256")
@@ -205,7 +232,10 @@ class EdgeTtsHelper(private val context: Context) {
                             webSocket.send(configMsg)
 
                             // 2. Send SSML request
-                            val dateStr = SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT'Z (zzzz)", Locale.US).format(Date())
+                            val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).apply {
+                                timeZone = java.util.TimeZone.getTimeZone("GMT")
+                            }
+                            val dateStr = dateFormat.format(Date())
                             val reqId = UUID.randomUUID().toString().replace("-", "")
                             val escapedText = text
                                 .replace("&", "&amp;")
@@ -279,36 +309,24 @@ class EdgeTtsHelper(private val context: Context) {
     }
 
     /**
-     * Tier 2: StreamElements Amazon Polly HD Neural Stream
-     * High-clarity studio MP3 stream for warm natural human voice.
+     * Tier 2: Google Gemini Dedicated Studio Neural Voice
+     * Synthesizes 24kHz ultra-realistic human voice (WAV).
      */
-    private suspend fun fetchStreamElementsAudio(text: String, voice: String): ByteArray? = withContext(Dispatchers.IO) {
+    private suspend fun fetchGeminiStudioAudio(text: String, voice: String): ByteArray? = withContext(Dispatchers.IO) {
         try {
-            val pollyVoice = when {
-                voice.contains("Ryan", ignoreCase = true) || voice.contains("Arthur", ignoreCase = true) || voice.contains("GB", ignoreCase = true) -> "Brian"
-                voice.contains("Guy", ignoreCase = true) || voice.contains("David", ignoreCase = true) -> "Joey"
-                voice.contains("Sophia", ignoreCase = true) || voice.contains("Nicole", ignoreCase = true) || voice.contains("AU", ignoreCase = true) -> "Nicole"
-                voice.contains("Jenny", ignoreCase = true) -> "Kendra"
-                else -> "Joanna"
+            if (!com.example.data.remote.GeminiClient.hasValidApiKey()) return@withContext null
+            val geminiVoice = when {
+                voice.contains("Guy", ignoreCase = true) || voice.contains("David", ignoreCase = true) -> "Puck"
+                voice.contains("Ryan", ignoreCase = true) || voice.contains("Arthur", ignoreCase = true) || voice.contains("GB", ignoreCase = true) -> "Charon"
+                voice.contains("Marcus", ignoreCase = true) || voice.contains("Fenrir", ignoreCase = true) -> "Fenrir"
+                voice.contains("Sophia", ignoreCase = true) || voice.contains("Kore", ignoreCase = true) -> "Kore"
+                else -> "Aoede"
             }
-            val encoded = java.net.URLEncoder.encode(text, "UTF-8")
-            val pollyUrl = "https://api.streamelements.com/kappa/v2/speech?voice=$pollyVoice&text=$encoded"
-            val pollyReq = Request.Builder()
-                .url(pollyUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                .build()
-
-            val resp = httpClient.newCall(pollyReq).execute()
-            if (resp.isSuccessful) {
-                val bytes = resp.body?.bytes()
-                if (bytes != null && bytes.isNotEmpty()) {
-                    return@withContext bytes
-                }
-            }
+            return@withContext com.example.data.remote.GeminiClient.synthesizeHumanSpeech(text, geminiVoice)
         } catch (e: Exception) {
-            Log.d("EdgeTtsHelper", "StreamElements note: ${e.message}")
+            Log.d("EdgeTtsHelper", "Gemini Studio TTS note: ${e.message}")
+            return@withContext null
         }
-        return@withContext null
     }
 
     /**
@@ -337,50 +355,55 @@ class EdgeTtsHelper(private val context: Context) {
     }
 
     /**
-     * Fetch neural audio via Multi-Tier Open Engine
+     * Fetch neural audio via Multi-Tier Human-like Voice Engine
      */
     private suspend fun fetchNeuralAudioFile(text: String): File? = withContext(Dispatchers.IO) {
         val key = computeCacheKey(text, voiceName)
-        val cachedFile = File(audioCacheDir, "$key.mp3")
-        if (cachedFile.exists() && cachedFile.length() > 500) {
-            prefetchCache[key] = cachedFile
-            return@withContext cachedFile
+        val cachedMp3 = File(audioCacheDir, "$key.mp3")
+        if (cachedMp3.exists() && cachedMp3.length() > 500) {
+            prefetchCache[key] = cachedMp3
+            return@withContext cachedMp3
+        }
+        val cachedWav = File(audioCacheDir, "$key.wav")
+        if (cachedWav.exists() && cachedWav.length() > 500) {
+            prefetchCache[key] = cachedWav
+            return@withContext cachedWav
         }
 
-        // 1. Try Direct Microsoft Edge WebSocket Protocol
+        // 1. Try Direct Microsoft Edge WebSocket Protocol (24kHz Studio MP3)
         try {
             val edgeBytes = fetchEdgeWebSocketAudio(text, voiceName)
             if (edgeBytes != null && edgeBytes.size > 500) {
-                FileOutputStream(cachedFile).use { fos -> fos.write(edgeBytes) }
-                prefetchCache[key] = cachedFile
-                Log.d("EdgeTtsHelper", "✅ Synthesized via Direct Microsoft Edge WebSocket (${edgeBytes.size} bytes)")
-                return@withContext cachedFile
+                FileOutputStream(cachedMp3).use { fos -> fos.write(edgeBytes) }
+                prefetchCache[key] = cachedMp3
+                Log.d("EdgeTtsHelper", "Synthesized via Microsoft Edge Neural Voice (${edgeBytes.size} bytes)")
+                return@withContext cachedMp3
             }
         } catch (e: Exception) {
             Log.w("EdgeTtsHelper", "Edge WebSocket note: ${e.message}")
         }
 
-        // 2. Try StreamElements Studio Polly Stream
+        // 2. Try Google Gemini Dedicated Studio Neural Voice (24kHz Studio WAV)
         try {
-            val pollyBytes = fetchStreamElementsAudio(text, voiceName)
-            if (pollyBytes != null && pollyBytes.size > 500) {
-                FileOutputStream(cachedFile).use { fos -> fos.write(pollyBytes) }
-                prefetchCache[key] = cachedFile
-                Log.d("EdgeTtsHelper", "✅ Synthesized via StreamElements Studio Neural Voice (${pollyBytes.size} bytes)")
-                return@withContext cachedFile
+            val geminiWav = fetchGeminiStudioAudio(text, voiceName)
+            if (geminiWav != null && geminiWav.size > 500) {
+                FileOutputStream(cachedWav).use { fos -> fos.write(geminiWav) }
+                prefetchCache[key] = cachedWav
+                Log.d("EdgeTtsHelper", "Synthesized via Gemini Studio Neural Human Voice (${geminiWav.size} bytes)")
+                return@withContext cachedWav
             }
         } catch (e: Exception) {
-            Log.w("EdgeTtsHelper", "Polly stream note: ${e.message}")
+            Log.w("EdgeTtsHelper", "Gemini Studio stream note: ${e.message}")
         }
 
         // 3. Try Google Studio Neural Stream
         try {
             val googleBytes = fetchGoogleTtsAudio(text)
             if (googleBytes != null && googleBytes.size > 500) {
-                FileOutputStream(cachedFile).use { fos -> fos.write(googleBytes) }
-                prefetchCache[key] = cachedFile
-                Log.d("EdgeTtsHelper", "✅ Synthesized via Google Neural Stream (${googleBytes.size} bytes)")
-                return@withContext cachedFile
+                FileOutputStream(cachedMp3).use { fos -> fos.write(googleBytes) }
+                prefetchCache[key] = cachedMp3
+                Log.d("EdgeTtsHelper", "Synthesized via Google Neural Stream (${googleBytes.size} bytes)")
+                return@withContext cachedMp3
             }
         } catch (e: Exception) {
             Log.w("EdgeTtsHelper", "Google stream note: ${e.message}")

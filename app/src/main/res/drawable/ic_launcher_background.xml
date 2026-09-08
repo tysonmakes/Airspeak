@@ -14,14 +14,10 @@
                 android:endX="108"
                 android:endY="108"
                 android:type="linear">
-                <item android:offset="0.0" android:color="#0F172A" />
+                <item android:offset="0.0" android:color="#0B0F19" />
                 <item android:offset="0.5" android:color="#1E1B4B" />
-                <item android:offset="1.0" android:color="#312E81" />
+                <item android:offset="1.0" android:color="#4338CA" />
             </gradient>
         </aapt:attr>
     </path>
-    <path
-        android:pathData="M0,0L108,108"
-        android:strokeWidth="0.5"
-        android:strokeColor="#206366F1" />
 </vector>

@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/ic_airspeak_logo_1788576792889"
+        android:drawable="@drawable/ic_airspeak_fg"
         android:gravity="center" />
 </layer-list>

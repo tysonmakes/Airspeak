@@ -152,6 +152,7 @@ fun LiveCallScreen(
     val pollinations = remember { PollinationsApiService() }
     val aiEngineManager = remember { AiEngineManager(context) }
     val geminiNativePlayer = remember { GeminiNativeAudioPlayer(context) }
+    val ttsHelper = remember { TextToSpeechHelper(context) }
     val currentEngine by aiEngineManager.currentEngine.collectAsState()
     var showEngineSelectorDialog by remember { mutableStateOf(false) }
     var lastTurnLatencyMs by remember { mutableLongStateOf(0L) }
@@ -322,20 +323,50 @@ fun LiveCallScreen(
                 }
             } else {
                 isAiThinking = false
-                val errorMsg = "Sorry, I couldn't connect to the Gemini voice network right now."
+                val convHist = transcriptItems.takeLast(4).joinToString("\n") { "${it.sender}: ${it.text}" }
+                val fallbackTurn = aiEngineManager.generateLiveCallTurn(
+                    tutorName = selectedTutor.name,
+                    tutorPersona = selectedTutor.bio,
+                    userSpokenText = clean,
+                    callTopic = selectedTopic,
+                    conversationHistory = convHist
+                )
+
+                val replyText = fallbackTurn.spokenReply.ifBlank {
+                    "That's very interesting! Could you tell me a little bit more about that?"
+                }
+                val correction = fallbackTurn.liveCorrection
+                val praise = fallbackTurn.livePraise
+
+                if (!correction.isNullOrBlank()) {
+                    val corrItem = LiveCallCorrectionItem(
+                        originalSaid = clean,
+                        correctedVersion = correction,
+                        reason = "Syntax & fluency coaching"
+                    )
+                    activeCorrection = corrItem
+                    sessionCorrections.add(corrItem)
+                }
+                latestPraise = praise
+                activeCoachTip = if (!correction.isNullOrBlank()) "💡 $correction" else praise
+
                 transcriptItems.add(
                     LiveCallTranscriptItem(
                         sender = CallSender.AI,
-                        text = errorMsg
+                        text = replyText,
+                        liveCorrection = correction,
+                        livePraise = praise
                     )
                 )
+
                 isAiSpeaking = true
-                geminiNativePlayer.stop()
-                delay(2000)
-                isAiSpeaking = false
-                if (callState == CallState.ACTIVE && !isMuted) {
-                    speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { nextSpeech ->
-                        processUserTurn(nextSpeech)
+                ttsHelper.setVoiceName(selectedTutor.edgeVoiceName)
+                ttsHelper.speak(replyText) {
+                    isAiSpeaking = false
+                    if (callState == CallState.ACTIVE && !isMuted) {
+                        speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { nextSpeech ->
+                            processUserTurn(nextSpeech)
+                        }
                     }
                 }
             }
@@ -392,11 +423,13 @@ fun LiveCallScreen(
                 }
             } else {
                 isAiSpeaking = true
-                delay(2000)
-                isAiSpeaking = false
-                if (callState == CallState.ACTIVE && !isMuted) {
-                    speechHelper.startListening(silenceTimeoutMs = 1200L, continuous = true) { spoken ->
-                        processUserTurn(spoken)
+                ttsHelper.setVoiceName(selectedTutor.edgeVoiceName)
+                ttsHelper.speak(greeting) {
+                    isAiSpeaking = false
+                    if (callState == CallState.ACTIVE && !isMuted) {
+                        speechHelper.startListening(silenceTimeoutMs = 1200L, continuous = true) { spoken ->
+                            processUserTurn(spoken)
+                        }
                     }
                 }
             }
@@ -406,6 +439,7 @@ fun LiveCallScreen(
     fun endCall() {
         speechHelper.stopListening()
         geminiNativePlayer.stop()
+        ttsHelper.stop()
         
         isAiSpeaking = false
         isAiThinking = false

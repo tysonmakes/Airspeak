@@ -476,8 +476,8 @@ class AiEngineManager(private val context: Context) {
     }
 
     /**
-     * Engine 1: Official Direct Gemini 2.5 Flash (Primary Default Best Free Tier)
-     * Endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=YOUR_GEMINI_API_KEY
+     * Engine 1: Official Direct Gemini 3.6 Flash (Primary Default Best Tier)
+     * Endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=YOUR_GEMINI_API_KEY
      */
     private suspend fun tryGeminiLiveTurn(
         tutorName: String,
@@ -512,7 +512,7 @@ class AiEngineManager(private val context: Context) {
         val raw = GeminiClient.queryGeminiText(
             prompt = userPrompt,
             systemInstruction = systemPrompt,
-            model = "gemini-2.5-flash",
+            model = "gemini-3.6-flash",
             maxTokens = 120,
             temperature = 0.7f
         ) ?: return null
@@ -787,7 +787,7 @@ class AiEngineManager(private val context: Context) {
                     if (!GeminiClient.hasValidApiKey()) return@withContext -1L
                     GeminiClient.queryGeminiText(
                         prompt = "Reply OK",
-                        model = "gemini-2.5-flash",
+                        model = "gemini-3.6-flash",
                         maxTokens = 10
                     )
                 }

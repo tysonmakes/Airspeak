@@ -79,7 +79,7 @@ data class GeminiVoiceTurnResult(
 )
 
 interface GeminiApi {
-    @POST("v1beta/models/gemini-2.5-flash:generateContent")
+    @POST("v1beta/models/gemini-3.6-flash:generateContent")
     suspend fun generateContent(
         @Query("key") apiKey: String,
         @Body request: GeminiRequest
@@ -165,7 +165,7 @@ object GeminiClient {
             )
         }
         val startTime = System.currentTimeMillis()
-        val modelsToTry = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash")
+        val modelsToTry = listOf("gemini-3.6-flash", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash-preview-tts")
         var lastErrorMsg = ""
 
         for (model in modelsToTry) {
@@ -256,7 +256,7 @@ object GeminiClient {
     suspend fun queryGeminiText(
         prompt: String,
         systemInstruction: String? = null,
-        model: String = "gemini-2.5-flash",
+        model: String = "gemini-3.6-flash",
         maxTokens: Int = 180,
         temperature: Float = 0.7f
     ): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -288,8 +288,109 @@ object GeminiClient {
     }
 
     /**
+     * Synthesize natural human speech using Gemini dedicated Studio TTS models.
+     * Returns standard WAV bytes (PCM 24kHz with 44-byte RIFF header) for zero-glitch playback.
+     */
+    suspend fun synthesizeHumanSpeech(
+        text: String,
+        voiceName: String = "Aoede" // Aoede, Puck, Fenrir, Kore, Charon
+    ): ByteArray? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (!hasValidApiKey()) return@withContext null
+        val clean = text.trim()
+        if (clean.isBlank()) return@withContext null
+        val apiKey = getEffectiveApiKey()
+        val ttsModels = listOf("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts")
+
+        for (m in ttsModels) {
+            try {
+                val request = GeminiRequest(
+                    contents = listOf(
+                        GeminiContent(
+                            parts = listOf(GeminiPart(text = clean))
+                        )
+                    ),
+                    generationConfig = GeminiGenerationConfig(
+                        responseModalities = listOf("AUDIO"),
+                        speechConfig = GeminiSpeechConfig(
+                            voiceConfig = GeminiVoiceConfig(
+                                prebuiltVoiceConfig = GeminiPrebuiltVoiceConfig(voiceName = voiceName)
+                            )
+                        )
+                    )
+                )
+                val response = api.generateContentDynamic(m, apiKey, request)
+                val parts = response.candidates?.firstOrNull()?.content?.parts
+                val audioPart = parts?.firstOrNull { it.inlineData != null && !it.inlineData.data.isNullOrBlank() }
+                if (audioPart != null) {
+                    val pcmBytes = Base64.decode(audioPart.inlineData!!.data, Base64.DEFAULT)
+                    if (pcmBytes.isNotEmpty()) {
+                        Log.d("GeminiClient", "Synthesized ${pcmBytes.size} bytes studio audio via $m ($voiceName)")
+                        return@withContext convertPcmToWav(pcmBytes, sampleRate = 24000, channels = 1)
+                    }
+                }
+            } catch (e: Exception) {
+                checkAndRecordQuotaException(e)
+                Log.d("GeminiClient", "TTS model $m note: ${e.message}")
+            }
+        }
+        return@withContext null
+    }
+
+    fun convertPcmToWav(pcmBytes: ByteArray, sampleRate: Int = 24000, channels: Int = 1): ByteArray {
+        val totalAudioLen = pcmBytes.size
+        val totalDataLen = totalAudioLen + 36
+        val byteRate = sampleRate * channels * 2
+        val header = ByteArray(44)
+        header[0] = 'R'.code.toByte()
+        header[1] = 'I'.code.toByte()
+        header[2] = 'F'.code.toByte()
+        header[3] = 'F'.code.toByte()
+        header[4] = (totalDataLen and 0xff).toByte()
+        header[5] = ((totalDataLen shr 8) and 0xff).toByte()
+        header[6] = ((totalDataLen shr 16) and 0xff).toByte()
+        header[7] = ((totalDataLen shr 24) and 0xff).toByte()
+        header[8] = 'W'.code.toByte()
+        header[9] = 'A'.code.toByte()
+        header[10] = 'V'.code.toByte()
+        header[11] = 'E'.code.toByte()
+        header[12] = 'f'.code.toByte()
+        header[13] = 'm'.code.toByte()
+        header[14] = 't'.code.toByte()
+        header[15] = ' '.code.toByte()
+        header[16] = 16
+        header[17] = 0
+        header[18] = 0
+        header[19] = 0
+        header[20] = 1 // PCM format
+        header[21] = 0
+        header[22] = channels.toByte()
+        header[23] = 0
+        header[24] = (sampleRate and 0xff).toByte()
+        header[25] = ((sampleRate shr 8) and 0xff).toByte()
+        header[26] = ((sampleRate shr 16) and 0xff).toByte()
+        header[27] = ((sampleRate shr 24) and 0xff).toByte()
+        header[28] = (byteRate and 0xff).toByte()
+        header[29] = ((byteRate shr 8) and 0xff).toByte()
+        header[30] = ((byteRate shr 16) and 0xff).toByte()
+        header[31] = ((byteRate shr 24) and 0xff).toByte()
+        header[32] = (channels * 2).toByte()
+        header[33] = 0
+        header[34] = 16
+        header[35] = 0
+        header[36] = 'd'.code.toByte()
+        header[37] = 'a'.code.toByte()
+        header[38] = 't'.code.toByte()
+        header[39] = 'a'.code.toByte()
+        header[40] = (totalAudioLen and 0xff).toByte()
+        header[41] = ((totalAudioLen shr 8) and 0xff).toByte()
+        header[42] = ((totalAudioLen shr 16) and 0xff).toByte()
+        header[43] = ((totalAudioLen shr 24) and 0xff).toByte()
+        return header + pcmBytes
+    }
+
+    /**
      * Direct Gemini Native Voice generation endpoint
-     * Sends conversation context and receives native audio bytes (PCM/MP3) + transcript in one sub-second turn.
+     * Sends conversation context and returns synthesized natural speech turn.
      */
     suspend fun queryGeminiNativeVoiceTurn(
         userText: String?,
@@ -316,55 +417,40 @@ object GeminiClient {
             val contents = conversationHistory.toMutableList()
             contents.add(GeminiContent(role = "user", parts = userParts))
 
+            // Step 1: Query Gemini 3.6 Flash for intelligent spoken response
             val request = GeminiRequest(
                 contents = contents,
                 systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemInstruction))),
                 generationConfig = GeminiGenerationConfig(
                     temperature = 0.7f,
-                    responseModalities = listOf("AUDIO", "TEXT"),
-                    speechConfig = GeminiSpeechConfig(
-                        voiceConfig = GeminiVoiceConfig(
-                            prebuiltVoiceConfig = GeminiPrebuiltVoiceConfig(voiceName = voiceName)
-                        )
-                    )
+                    maxOutputTokens = 150
                 )
             )
 
-            // Primary model for native audio is 2.0 or 2.5
-            val modelsToTry = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-exp")
-            var response: GeminiResponse? = null
-            for (m in modelsToTry) {
-                try {
-                    response = api.generateContentDynamic(m, apiKey, request)
-                    if (response.candidates?.firstOrNull()?.content?.parts?.isNotEmpty() == true) break
-                } catch (e: Exception) {
-                    Log.d("GeminiClient", "Native voice model $m attempt failed: ${e.message}")
-                }
-            }
+            val textResponse = api.generateContentDynamic("gemini-3.6-flash", apiKey, request)
+            val spokenText = textResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
+                ?: return@withContext null
 
-            val parts = response?.candidates?.firstOrNull()?.content?.parts ?: return@withContext null
+            // Parse out spoken portion vs coach guidance (like *Correction:* or *Praise:*)
+            var cleanToSpeak = spokenText
+            if (cleanToSpeak.contains("*Correction:*")) {
+                cleanToSpeak = cleanToSpeak.substringBefore("*Correction:*").trim()
+            }
+            if (cleanToSpeak.contains("*Praise:*")) {
+                cleanToSpeak = cleanToSpeak.substringBefore("*Praise:*").trim()
+            }
+            if (cleanToSpeak.isBlank()) cleanToSpeak = spokenText
+
+            // Step 2: Synthesize ultra-realistic human audio turn using dedicated Gemini Studio TTS
+            val wavAudio = synthesizeHumanSpeech(cleanToSpeak, voiceName)
             val latency = System.currentTimeMillis() - startTime
 
-            var audioBytes: ByteArray? = null
-            var mimeType: String? = null
-            var spokenText = ""
-
-            for (part in parts) {
-                if (part.inlineData != null && part.inlineData.data.isNotBlank()) {
-                    mimeType = part.inlineData.mimeType
-                    audioBytes = Base64.decode(part.inlineData.data, Base64.DEFAULT)
-                }
-                if (!part.text.isNullOrBlank()) {
-                    spokenText += if (spokenText.isBlank()) part.text else "\n${part.text}"
-                }
-            }
-
             return@withContext GeminiVoiceTurnResult(
-                audioBytes = audioBytes,
-                audioMimeType = mimeType,
-                spokenText = spokenText.trim(),
+                audioBytes = wavAudio,
+                audioMimeType = "audio/wav",
+                spokenText = spokenText,
                 latencyMs = latency,
-                isNativeAudio = audioBytes != null
+                isNativeAudio = wavAudio != null
             )
         } catch (e: Exception) {
             checkAndRecordQuotaException(e)
