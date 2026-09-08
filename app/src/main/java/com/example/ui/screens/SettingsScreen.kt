@@ -421,13 +421,13 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Google Gemini 1.5 Flash API Key",
+                            text = "Google Gemini 2.5 Flash API Key (Best Free Tier)",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Text(
-                            text = "Used for sub-second primary calls & chapter grading. Key is stored locally in private SharedPreferences.",
+                            text = "Used for sub-second primary calls & chapter grading. Get free key at Google AI Studio (15 req/min, 1,500 req/day free).",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(alpha = 0.6f)
                         )
@@ -650,7 +650,7 @@ fun SettingsScreen(
                                 color = Color.White
                             )
                             Text(
-                                text = "${(speechRate * 100).roundToInt()}% (${if (speechRate in 0.85f..0.92f) "Recommended ~0.88x" else if (speechRate < 0.85f) "Slower" else "Faster"})",
+                                text = "${(speechRate * 100).roundToInt()}% (${if (speechRate in 0.95f..1.05f) "Optimal 1.0x" else if (speechRate < 0.95f) "Slower" else "Faster"})",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = EmeraldSuccess

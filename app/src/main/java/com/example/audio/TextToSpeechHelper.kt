@@ -17,7 +17,7 @@ class TextToSpeechHelper(context: Context) {
 
     val isSpeaking: StateFlow<Boolean> = edgeTts.isSpeaking
 
-    private var currentSpeechRate: Float = 0.90f
+    private var currentSpeechRate: Float = 1.0f
     private var currentVoiceName: String = "en-US-AnaNeural"
 
     init {
@@ -38,7 +38,7 @@ class TextToSpeechHelper(context: Context) {
     }
 
     fun setSpeechRate(rate: Float) {
-        currentSpeechRate = rate.coerceIn(0.6f, 1.5f)
+        currentSpeechRate = rate.coerceIn(0.7f, 1.5f)
         edgeTts.speechRate = currentSpeechRate
         localTts?.setSpeechRate(currentSpeechRate)
     }
@@ -48,7 +48,7 @@ class TextToSpeechHelper(context: Context) {
         edgeTts.voiceName = voice
     }
 
-    fun setVoiceProfile(locale: Locale = Locale.US, speechRate: Float = 0.90f, pitch: Float = 1.0f) {
+    fun setVoiceProfile(locale: Locale = Locale.US, speechRate: Float = 1.0f, pitch: Float = 1.0f) {
         currentSpeechRate = speechRate
         edgeTts.speechRate = speechRate
         edgeTts.pitch = pitch

@@ -37,12 +37,12 @@ enum class AiEngine(
     val isCloud: Boolean
 ) {
     GEMINI_15_FLASH(
-        id = "gemini_15_flash",
-        displayName = "Gemini 1.5 Flash (Primary)",
+        id = "gemini_25_flash",
+        displayName = "Gemini 2.5 Flash (Best Free Tier)",
         provider = "Google Cloud AI",
-        badge = "⚡ Ultra-Fast Cloud",
-        speedTier = "~350ms",
-        description = "Official direct Gemini 1.5 Flash. Sub-second evaluations, chapter scoring & Live Calls.",
+        badge = "⚡ Ultra-Fast Cloud (Free)",
+        speedTier = "~300ms",
+        description = "Official direct Google Gemini 2.5 Flash. Fastest free-tier AI for sub-second evaluations, chapter scoring & Live Calls.",
         isCloud = true
     ),
     GITHUB_MODELS(
@@ -116,14 +116,14 @@ enum class AiRoutingMode(
     AUTO(
         id = "auto",
         title = "Auto Mode (Default & Recommended)",
-        subtitle = "Intelligent multi-tier fallback: Gemini 1.5 Flash ➔ GitHub Models ➔ DeepSeek ➔ Keyless REST",
+        subtitle = "Intelligent multi-tier fallback: Gemini 2.5 Flash ➔ GitHub Models ➔ DeepSeek ➔ Keyless REST",
         badge = "⚡ Smart Fallback",
         isAuto = true
     ),
     GEMINI_ONLY(
         id = "gemini_only",
-        title = "Gemini 1.5 Flash Only",
-        subtitle = "Force 100% traffic through direct Gemini API",
+        title = "Gemini 2.5 Flash Only",
+        subtitle = "Force 100% traffic through direct Gemini 2.5 Flash API",
         badge = "Direct API",
         isAuto = false
     ),
@@ -449,8 +449,8 @@ class AiEngineManager(private val context: Context) {
     }
 
     /**
-     * Engine 1: Official Direct Gemini 1.5 Flash (Primary Default)
-     * Endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=YOUR_GEMINI_API_KEY
+     * Engine 1: Official Direct Gemini 2.5 Flash (Primary Default Best Free Tier)
+     * Endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=YOUR_GEMINI_API_KEY
      */
     private suspend fun tryGeminiLiveTurn(
         tutorName: String,
@@ -485,7 +485,7 @@ class AiEngineManager(private val context: Context) {
         val raw = GeminiClient.queryGeminiText(
             prompt = userPrompt,
             systemInstruction = systemPrompt,
-            model = "gemini-1.5-flash",
+            model = "gemini-2.5-flash",
             maxTokens = 120,
             temperature = 0.7f
         ) ?: return null

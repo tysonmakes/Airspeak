@@ -306,6 +306,7 @@ fun LiveCallScreen(
 
                 // Speak out the reply with tutor's voice
                 isAiSpeaking = true
+                ttsHelper.setVoiceName(selectedTutor.edgeVoiceName)
                 ttsHelper.setVoiceProfile(
                     locale = selectedTutor.accentLocale,
                     speechRate = selectedTutor.speechRate,
@@ -370,6 +371,7 @@ fun LiveCallScreen(
                 }
             } else {
                 isAiSpeaking = true
+                ttsHelper.setVoiceName(selectedTutor.edgeVoiceName)
                 ttsHelper.setVoiceProfile(
                     locale = selectedTutor.accentLocale,
                     speechRate = selectedTutor.speechRate,

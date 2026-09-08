@@ -44,9 +44,9 @@ class EdgeTtsHelper(private val context: Context) {
 
     // Active voice profile settings
     var voiceName: String = "en-US-AnaNeural"
-    var speechRate: Float = 0.88f
+    var speechRate: Float = 1.0f
         set(value) {
-            field = value.coerceIn(0.6f, 1.5f)
+            field = value.coerceIn(0.7f, 1.5f)
             localTts?.setSpeechRate(field)
         }
     var pitch: Float = 1.0f
