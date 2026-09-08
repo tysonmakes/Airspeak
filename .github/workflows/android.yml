@@ -38,10 +38,10 @@ jobs:
           fi
 
       - name: Run Unit & Robolectric Tests
-        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+        run: ./gradlew testDebugUnitTest -Dkotlin.compiler.execution.strategy=daemon --stacktrace
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: ./gradlew assembleDebug -Dkotlin.compiler.execution.strategy=daemon --stacktrace
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
