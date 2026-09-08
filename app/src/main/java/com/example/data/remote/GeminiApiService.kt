@@ -100,6 +100,26 @@ object GeminiClient {
     @Volatile
     var customApiKeyOverride: String? = null
 
+    @Volatile
+    var isQuotaExceeded: Boolean = false
+
+    @Volatile
+    var lastQuotaErrorMessage: String? = null
+
+    fun resetQuotaState() {
+        isQuotaExceeded = false
+        lastQuotaErrorMessage = null
+    }
+
+    fun checkAndRecordQuotaException(e: Throwable) {
+        val msg = e.message ?: ""
+        if (msg.contains("429") || msg.contains("RESOURCE_EXHAUSTED", ignoreCase = true) || msg.contains("quota", ignoreCase = true) || msg.contains("rate limit", ignoreCase = true) || msg.contains("exceeded", ignoreCase = true)) {
+            isQuotaExceeded = true
+            lastQuotaErrorMessage = "Gemini Free-Tier Rate Limit (15 req/min) or Daily Quota (1500 req/day) reached."
+            Log.w("GeminiClient", "Gemini Quota Exceeded Detected: $lastQuotaErrorMessage")
+        }
+    }
+
     private val okHttpClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
@@ -175,6 +195,7 @@ object GeminiClient {
             val response = api.generateContentDynamic(model, apiKey, request)
             return@withContext response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
         } catch (e: Exception) {
+            checkAndRecordQuotaException(e)
             Log.w("GeminiClient", "Gemini query error: ${e.message}")
             return@withContext null
         }
@@ -260,6 +281,7 @@ object GeminiClient {
                 isNativeAudio = audioBytes != null
             )
         } catch (e: Exception) {
+            checkAndRecordQuotaException(e)
             Log.e("GeminiClient", "Gemini Native Voice turn failed", e)
             return@withContext null
         }

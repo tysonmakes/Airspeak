@@ -84,7 +84,9 @@ import com.example.ui.theme.AmberTertiary
 import com.example.ui.theme.EmeraldSuccess
 
 import androidx.compose.material.icons.filled.Settings
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.remote.AiEngineManager
+import com.example.ui.components.QuotaLimitDialog
 
 sealed interface AppOverlay {
     data class Roleplay(val scenarioId: String? = null) : AppOverlay
@@ -437,6 +439,17 @@ fun MainScreen() {
             onDismiss = { overlayScreen = null },
             onOpenVocab = { overlayScreen = AppOverlay.Vocabulary },
             onOpenRoleplay = { overlayScreen = AppOverlay.Roleplay() }
+        )
+    }
+
+    val quotaAlert by aiEngineManager.quotaAlert.collectAsStateWithLifecycle()
+    quotaAlert?.let { alert ->
+        QuotaLimitDialog(
+            quotaAlert = alert,
+            onDismiss = { aiEngineManager.dismissQuotaAlert() },
+            onChangeModelOrKey = {
+                overlayScreen = AppOverlay.Settings
+            }
         )
     }
 }

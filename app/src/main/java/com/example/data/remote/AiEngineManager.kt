@@ -182,12 +182,31 @@ data class LiveCallTurnResult(
     val fluencyScore: Int = 88
 )
 
+data class QuotaAlertEvent(
+    val title: String = "⚠️ AI Model Limit Reached",
+    val message: String,
+    val failedEngine: AiEngine = AiEngine.GEMINI_15_FLASH,
+    val activeBackupEngine: AiEngine = AiEngine.POLLINATIONS_DEEPSEEK,
+    val isDailyQuotaExceeded: Boolean = true
+)
+
 class AiEngineManager(private val context: Context) {
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("ai_engine_preferences", Context.MODE_PRIVATE)
 
     private val pollinations = PollinationsApiService()
+
+    private val _quotaAlert = MutableStateFlow<QuotaAlertEvent?>(null)
+    val quotaAlert: StateFlow<QuotaAlertEvent?> = _quotaAlert.asStateFlow()
+
+    fun dismissQuotaAlert() {
+        _quotaAlert.value = null
+    }
+
+    fun triggerQuotaAlert(event: QuotaAlertEvent) {
+        _quotaAlert.value = event
+    }
 
     // 2-second timeout threshold for Auto Mode fallbacks to ensure real-time phone call feel
     private val autoModeTimeoutMs = 2000L
@@ -326,7 +345,7 @@ class AiEngineManager(private val context: Context) {
         // 2. AUTO MODE: Intelligent Multi-Tier Fallback Sequence with 2-Second Timeout:
         // Tier 1: Gemini 1.5 Flash ➔ Tier 2: GitHub Models ➔ Tier 3: Pollinations DeepSeek ➔ Tier 4: Keyless Open REST
 
-        // Tier 1: Gemini 1.5 Flash (Timeout: 3s)
+        // Tier 1: Gemini 2.5 Flash (Timeout: 2s)
         if (GeminiClient.hasValidApiKey()) {
             val geminiResult = withTimeoutOrNull(autoModeTimeoutMs) {
                 tryGeminiLiveTurn(tutorName, tutorPersona, userSpokenText, callTopic, conversationHistory)
@@ -341,7 +360,15 @@ class AiEngineManager(private val context: Context) {
                     latencyMs = latency
                 )
             }
-            Log.w("AiEngineManager", "Tier 1 (Gemini 1.5 Flash) exceeded 3s or failed. Proceeding to Tier 2 (GitHub Models).")
+            if (GeminiClient.isQuotaExceeded) {
+                _quotaAlert.value = QuotaAlertEvent(
+                    title = "⚠️ Gemini Daily Quota / Rate Limit Reached",
+                    message = "Aapki Gemini API limit (1500 req/day ya 15 req/min) reach ho gayi hai. App automatically DeepSeek-V3 / Free Backup Engine par switch ho gayi hai taaki aapka flow na ruke!",
+                    failedEngine = AiEngine.GEMINI_15_FLASH,
+                    activeBackupEngine = AiEngine.POLLINATIONS_DEEPSEEK
+                )
+            }
+            Log.w("AiEngineManager", "Tier 1 (Gemini 2.5 Flash) timed out or hit quota. Proceeding to Tier 2 (GitHub Models).")
         }
 
         // Tier 2: GitHub Models API (Timeout: 3s)
