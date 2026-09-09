@@ -212,29 +212,31 @@ fun ChapterFullViewScreen(
         }
     }
 
-    // Speech Evaluation Trigger
+    // Speech Evaluation Trigger with Multi-Candidate Analysis
     fun triggerSpeakingEvaluation() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             speechStartTime = System.currentTimeMillis()
-            speechHelper.startListening { result ->
-                if (result.isNotBlank()) {
+            speechHelper.startListeningWithCandidates(silenceTimeoutMs = 2200L, continuous = false) { bestResult, allCandidates ->
+                val chosenText = bestResult.trim()
+                if (chosenText.isNotBlank()) {
                     val durationSec = maxOf(1L, (System.currentTimeMillis() - speechStartTime) / 1000L)
-                    spokenText = result.trim()
-                    evaluatePronunciation(
+                    spokenText = chosenText
+                    evaluatePronunciationWithCandidates(
                         target = chapter.pronunciationSentence,
-                        spoken = result.trim(),
+                        primarySpoken = chosenText,
+                        allCandidates = allCandidates.ifEmpty { listOf(chosenText) },
                         durationSec = durationSec
                     ) { report ->
                         evalReport = report
                         evaluationScore = report.overallScore
                         missingWordsList = report.missingWords
                         feedbackMessage = report.feedback
-                        if (report.overallScore >= 65) {
+                        if (report.overallScore >= 60) {
                             isPassed = true
                         } else {
                             coroutineScope.launch {
                                 repository.logWeakness(
-                                    originalMistake = result.ifBlank { "Unclear utterance" },
+                                    originalMistake = chosenText.ifBlank { "Unclear utterance" },
                                     correctedForm = chapter.pronunciationSentence,
                                     category = "Pronunciation",
                                     explanation = "Chapter ${chapter.chapterNumber} Score: ${report.overallScore}%. Missing words: [${report.missingWords.joinToString(", ")}]. Tip: ${chapter.pronunciationTip}"
@@ -1391,22 +1393,58 @@ private fun ScorePillarChip(label: String, value: String) {
 }
 
 // ==============================================================================
-// 3. 4-PILLAR EVALUATION ALGORITHM & STRING MATCHING
+// 3. ADVANCED FORGIVING MULTI-CANDIDATE PRONUNCIATION EVALUATION ALGORITHM
 // ==============================================================================
-private fun evaluatePronunciation(
+private fun evaluatePronunciationWithCandidates(
     target: String,
-    spoken: String,
+    primarySpoken: String,
+    allCandidates: List<String>,
     durationSec: Long = 3L,
     onResult: (report: ChapterEvaluationReport) -> Unit
 ): Int {
-    val cleanTarget = target.lowercase().replace(Regex("[^a-z0-9\\s]"), "")
-    val cleanSpoken = spoken.lowercase().replace(Regex("[^a-z0-9\\s]"), "")
+    // Try all recognition candidates and pick the best score
+    val candidatesToEvaluate = (listOf(primarySpoken) + allCandidates).distinct().filter { it.isNotBlank() }
+    
+    if (candidatesToEvaluate.isEmpty()) {
+        val emptyReport = ChapterEvaluationReport(
+            overallScore = 0,
+            fluencyScore = 0,
+            fillerCount = 0,
+            wpm = 0,
+            structureScore = 0,
+            missingWords = normalizeSpeechWords(target),
+            feedback = "No clear speech detected. Please tap mic and speak clearly."
+        )
+        onResult(emptyReport)
+        return 0
+    }
 
-    val targetWords = cleanTarget.split(Regex("\\s+")).filter { it.isNotBlank() }
-    val spokenWords = cleanSpoken.split(Regex("\\s+")).filter { it.isNotBlank() }
+    var bestReport: ChapterEvaluationReport? = null
+    var bestScore = -1
+
+    for (candidate in candidatesToEvaluate) {
+        val report = evaluateSingleUtterance(target, candidate, durationSec)
+        if (report.overallScore > bestScore) {
+            bestScore = report.overallScore
+            bestReport = report
+        }
+    }
+
+    val finalReport = bestReport ?: evaluateSingleUtterance(target, primarySpoken, durationSec)
+    onResult(finalReport)
+    return finalReport.overallScore
+}
+
+private fun evaluateSingleUtterance(
+    target: String,
+    spoken: String,
+    durationSec: Long = 3L
+): ChapterEvaluationReport {
+    val targetWords = normalizeSpeechWords(target)
+    val spokenWords = normalizeSpeechWords(spoken)
 
     if (spokenWords.isEmpty()) {
-        val emptyReport = ChapterEvaluationReport(
+        return ChapterEvaluationReport(
             overallScore = 0,
             fluencyScore = 0,
             fillerCount = 0,
@@ -1415,8 +1453,6 @@ private fun evaluatePronunciation(
             missingWords = targetWords,
             feedback = "No clear speech detected. Please tap mic and speak clearly."
         )
-        onResult(emptyReport)
-        return 0
     }
 
     // 1. Detect filler words ("um", "uh", "er", "like", "actually", "basically", "you know")
@@ -1436,7 +1472,7 @@ private fun evaluatePronunciation(
         if (spokenSet.contains(word)) {
             matchedCount++
         } else {
-            val nearMatch = spokenWords.any { s -> isNearMatch(word, s) }
+            val nearMatch = spokenWords.any { s -> isPhoneticOrNearMatch(word, s) }
             if (nearMatch) {
                 matchedCount++
             } else {
@@ -1453,23 +1489,23 @@ private fun evaluatePronunciation(
 
     // 4. Fluency Score based on Pace and Filler words
     val paceScore = when (calculatedWpm) {
-        in 110..160 -> 95
-        in 90..109, in 161..185 -> 80
-        else -> 65
+        in 100..170 -> 95
+        in 80..99, in 171..195 -> 85
+        else -> 70
     }
-    val fillerPenalty = (fillerCount * 8).coerceAtMost(30)
-    val fluencyScore = (paceScore - fillerPenalty).coerceIn(20, 100)
+    val fillerPenalty = (fillerCount * 5).coerceAtMost(25)
+    val fluencyScore = (paceScore - fillerPenalty).coerceIn(25, 100)
 
-    // Overall blended score (65% required to pass)
-    val calculatedScore = ((structureScore * 0.65f) + (fluencyScore * 0.35f)).roundToInt().coerceIn(10, 100)
+    // Overall blended score (60% required to pass)
+    val calculatedScore = ((structureScore * 0.70f) + (fluencyScore * 0.30f)).roundToInt().coerceIn(10, 100)
 
     val feedback = when {
         calculatedScore >= 85 -> "Outstanding! Natural pace ($calculatedWpm WPM), clean pronunciation & fluent rhythm."
-        calculatedScore >= 65 -> "Passed ($calculatedScore%)! Met the 65% threshold. Great job!"
-        else -> "Score: $calculatedScore% (Need 65%+ to pass). Missed: ${missingWords.take(3).joinToString(", ")}. Tap 🔊 to listen again."
+        calculatedScore >= 60 -> "Passed ($calculatedScore%)! Great accuracy. Ready to proceed!"
+        else -> "Score: $calculatedScore% (Need 60%+ to pass). Missed: ${missingWords.take(3).joinToString(", ")}. Tap 🔊 to listen again."
     }
 
-    val report = ChapterEvaluationReport(
+    return ChapterEvaluationReport(
         overallScore = calculatedScore,
         fluencyScore = fluencyScore,
         fillerCount = fillerCount,
@@ -1478,14 +1514,86 @@ private fun evaluatePronunciation(
         missingWords = missingWords,
         feedback = feedback
     )
-    onResult(report)
-    return calculatedScore
 }
 
-private fun isNearMatch(s1: String, s2: String): Boolean {
-    if (s1 == s2) return true
-    if (kotlin.math.abs(s1.length - s2.length) > 2) return false
-    val dist = levenshteinDistance(s1, s2)
+/**
+ * Normalizes speech text by expanding contractions, numbers, and stripping punctuation
+ */
+private fun normalizeSpeechWords(input: String): List<String> {
+    var s = input.lowercase().trim()
+    
+    // Contractions expansion
+    s = s.replace("i'm", "i am")
+        .replace("i'd", "i would")
+        .replace("i'll", "i will")
+        .replace("i've", "i have")
+        .replace("you're", "you are")
+        .replace("you'll", "you will")
+        .replace("you've", "you have")
+        .replace("we're", "we are")
+        .replace("they're", "they are")
+        .replace("it's", "it is")
+        .replace("that's", "that is")
+        .replace("there's", "there is")
+        .replace("what's", "what is")
+        .replace("let's", "let us")
+        .replace("can't", "can not")
+        .replace("cannot", "can not")
+        .replace("won't", "will not")
+        .replace("don't", "do not")
+        .replace("doesn't", "does not")
+        .replace("didn't", "did not")
+        .replace("couldn't", "could not")
+        .replace("wouldn't", "would not")
+        .replace("shouldn't", "should not")
+        .replace("hasn't", "has not")
+        .replace("haven't", "have not")
+        .replace("isn't", "is not")
+        .replace("aren't", "are not")
+        .replace("oat milk", "oatmilk")
+        .replace("wifi", "wi fi")
+        .replace("checkout", "check out")
+        .replace("12%", "twelve percent")
+        .replace("12 percent", "twelve percent")
+        .replace("412", "four twelve")
+        .replace("flight 412", "flight four twelve")
+        .replace("2:00", "two")
+        .replace("2 pm", "two pm")
+        .replace(" 2 ", " two ")
+        .replace(" 4 ", " four ")
+        .replace(" 1 ", " one ")
+        .replace(" 3 ", " three ")
+        .replace(" 5 ", " five ")
+
+    val cleaned = s.replace(Regex("[^a-z0-9\\s]"), " ")
+    return cleaned.split(Regex("\\s+")).filter { it.isNotBlank() }
+}
+
+private fun isPhoneticOrNearMatch(targetWord: String, spokenWord: String): Boolean {
+    if (targetWord == spokenWord) return true
+    
+    // Equivalent phonetic or accent variations
+    val synonyms = mapOf(
+        "latte" to listOf("late", "latti", "coffee"),
+        "decaf" to listOf("d caf", "decaffeinated", "d-caf", "dee caf"),
+        "uptown" to listOf("up town", "up-town"),
+        "downtown" to listOf("down town", "down-town"),
+        "slack" to listOf("slac", "lack"),
+        "oatmilk" to listOf("oat", "milk"),
+        "twelve" to listOf("12", "twelf"),
+        "two" to listOf("2", "too", "to"),
+        "four" to listOf("4", "for", "fore"),
+        "their" to listOf("there", "they're"),
+        "there" to listOf("their", "they're"),
+        "gym" to listOf("jim", "gim"),
+        "route" to listOf("rout"),
+        "yeah" to listOf("yes", "ya"),
+        "hi" to listOf("hello", "hey")
+    )
+    if (synonyms[targetWord]?.contains(spokenWord) == true) return true
+
+    if (kotlin.math.abs(targetWord.length - spokenWord.length) > 2) return false
+    val dist = levenshteinDistance(targetWord, spokenWord)
     return dist <= 2
 }
 

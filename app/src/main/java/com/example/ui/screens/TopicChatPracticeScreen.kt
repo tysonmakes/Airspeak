@@ -511,13 +511,21 @@ private fun ActiveTopicChatSession(
                 }
             }
 
+            // Sanitize spoken reply to remove any accidental markdown tutor prefix
+            val cleanReply = turn.spokenReply
+                .replace(Regex("""^(\*{0,2}\(?[A-Za-z0-9_\- ]+\)?\*{0,2}:?\s*)+"""), "")
+                .replace(Regex("""^\*+|\*+$"""), "")
+                .replace(Regex("""^\(.*?\)\s*"""), "")
+                .trim()
+                .ifBlank { "That's wonderful! Tell me more about that." }
+
             // Add AI reply
             val aiMsg = TopicChatMessage(
                 sender = CallSender.AI,
-                text = turn.spokenReply
+                text = cleanReply
             )
             messages.add(aiMsg)
-            ttsHelper.speak(turn.spokenReply)
+            ttsHelper.speak(cleanReply)
 
             listState.animateScrollToItem(messages.size - 1)
         }
@@ -528,9 +536,11 @@ private fun ActiveTopicChatSession(
     ) { isGranted ->
         if (isGranted) {
             isRecordingAudio = true
-            speechHelper.startListening { recognized ->
+            speechHelper.startListening(silenceTimeoutMs = 2000L, continuous = false) { recognized ->
                 isRecordingAudio = false
-                handleSend(recognized, isAudio = true)
+                if (recognized.isNotBlank()) {
+                    handleSend(recognized, isAudio = true)
+                }
             }
         }
     }
@@ -628,9 +638,11 @@ private fun ActiveTopicChatSession(
                                         == PackageManager.PERMISSION_GRANTED
                                     ) {
                                         isRecordingAudio = true
-                                        speechHelper.startListening { recognized ->
+                                        speechHelper.startListening(silenceTimeoutMs = 2000L, continuous = false) { recognized ->
                                             isRecordingAudio = false
-                                            handleSend(recognized, isAudio = true)
+                                            if (recognized.isNotBlank()) {
+                                                handleSend(recognized, isAudio = true)
+                                            }
                                         }
                                     } else {
                                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)

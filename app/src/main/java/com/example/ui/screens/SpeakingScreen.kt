@@ -1038,7 +1038,7 @@ private fun startSpeechRecording(
     onTranscriptUpdate: (String) -> Unit
 ) {
     onStart()
-    speechHelper.startListening { finalResult ->
+    speechHelper.startListening(continuous = false) { finalResult ->
         onTranscriptUpdate(finalResult)
     }
 }

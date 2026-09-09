@@ -752,7 +752,7 @@ private fun PronunciationExerciseDialog(
     ) { isGranted ->
         if (isGranted) {
             isRecording = true
-            speechHelper.startListening { result ->
+            speechHelper.startListening(continuous = false) { result ->
                 recordedText = result
                 isRecording = false
                 // Simple accuracy scoring
@@ -849,7 +849,7 @@ private fun PronunciationExerciseDialog(
                                     == PackageManager.PERMISSION_GRANTED
                                 ) {
                                     isRecording = true
-                                    speechHelper.startListening { result ->
+                                    speechHelper.startListening(continuous = false) { result ->
                                         recordedText = result
                                         isRecording = false
                                         val targetWords = step.targetSentence.lowercase().split("\\s+".toRegex()).toSet()
@@ -1212,7 +1212,7 @@ private fun RoleplayPracticeDialog(
     ) { isGranted ->
         if (isGranted) {
             isRecording = true
-            speechHelper.startListening { result ->
+            speechHelper.startListening(continuous = false) { result ->
                 recordedText = result
                 isRecording = false
                 val targetWords = step.targetSentence.lowercase().split("\\s+".toRegex()).toSet()
@@ -1308,7 +1308,7 @@ private fun RoleplayPracticeDialog(
                                     == PackageManager.PERMISSION_GRANTED
                                 ) {
                                     isRecording = true
-                                    speechHelper.startListening { result ->
+                                    speechHelper.startListening(continuous = false) { result ->
                                         recordedText = result
                                         isRecording = false
                                         val targetWords = step.targetSentence.lowercase().split("\\s+".toRegex()).toSet()

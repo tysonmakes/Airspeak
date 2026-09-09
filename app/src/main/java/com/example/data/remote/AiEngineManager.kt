@@ -493,8 +493,10 @@ class AiEngineManager(private val context: Context) {
             Persona: $tutorPersona. Topic: $callTopic.
             
             Guidelines:
-            - STRICT LIMIT: Maximum 20 words per turn. Spoken reply MUST be 1 brief natural sentence under 20 words.
+            - Spoken reply MUST be a complete, natural, conversational response (1-2 sentences, about 15-25 words).
             - Talk like a real, warm person on a phone call.
+            - Never truncate or cut off mid-sentence.
+            - NEVER include any speaker prefixes, asterisks, or markdown headers (do NOT write "(Coach Emma)**" or "Coach Emma:").
             - If learner made an obvious grammar, preposition, or word choice mistake, provide a 1-sentence correction. Else null.
             - Provide 1 brief word of encouragement.
             
@@ -513,7 +515,7 @@ class AiEngineManager(private val context: Context) {
             prompt = userPrompt,
             systemInstruction = systemPrompt,
             model = "gemini-3.6-flash",
-            maxTokens = 120,
+            maxTokens = 1000,
             temperature = 0.7f
         ) ?: return null
 
@@ -674,17 +676,26 @@ class AiEngineManager(private val context: Context) {
             val start = clean.indexOf('{')
             val end = clean.lastIndexOf('}')
             if (start == -1 || end <= start) {
-                // If pure plain text was returned instead of JSON
-                if (clean.length in 5..120) {
-                    return Triple(clean, null, "Natural response!")
+                // If pure plain text was returned instead of JSON, sanitize any tutor label
+                val sanitized = clean
+                    .replace(Regex("""^(\*{0,2}\(?[A-Za-z0-9_\- ]+\)?\*{0,2}:?\s*)+"""), "")
+                    .replace(Regex("""^\*+|\*+$"""), "")
+                    .trim()
+                if (sanitized.length in 5..300 && !sanitized.startsWith("(")) {
+                    return Triple(sanitized, null, "Natural response!")
                 }
                 return null
             }
             val obj = JSONObject(clean.substring(start, end + 1))
-            val reply = obj.optString("spokenReply").takeIf { it.isNotBlank() } ?: return null
+            val rawReply = obj.optString("spokenReply").takeIf { it.isNotBlank() } ?: return null
+            val sanitizedReply = rawReply
+                .replace(Regex("""^(\*{0,2}\(?[A-Za-z0-9_\- ]+\)?\*{0,2}:?\s*)+"""), "")
+                .replace(Regex("""^\*+|\*+$"""), "")
+                .trim()
+            if (sanitizedReply.isBlank()) return null
             val corr = obj.optString("liveCorrection").takeIf { it.isNotBlank() && it != "null" }
             val praise = obj.optString("livePraise").takeIf { it.isNotBlank() && it != "null" }
-            return Triple(reply, corr, praise)
+            return Triple(sanitizedReply, corr, praise)
         } catch (e: Exception) {
             Log.e("AiEngineManager", "JSON parse error", e)
             return null

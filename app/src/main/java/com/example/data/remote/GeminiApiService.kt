@@ -257,7 +257,7 @@ object GeminiClient {
         prompt: String,
         systemInstruction: String? = null,
         model: String = "gemini-3.6-flash",
-        maxTokens: Int = 180,
+        maxTokens: Int = 1200,
         temperature: Float = 0.7f
     ): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         if (!hasValidApiKey()) return@withContext null
@@ -427,8 +427,20 @@ object GeminiClient {
                 )
             )
 
-            val textResponse = api.generateContentDynamic("gemini-3.6-flash", apiKey, request)
-            val spokenText = textResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
+            // Prefer ultra-fast flash-lite for sub-second conversational latency
+            val models = listOf("gemini-3.1-flash-lite-preview", "gemini-3.6-flash")
+            var textResponse: GeminiResponse? = null
+            for (m in models) {
+                try {
+                    textResponse = api.generateContentDynamic(m, apiKey, request)
+                    if (textResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.isNotBlank() == true) {
+                        break
+                    }
+                } catch (e: Exception) {
+                    checkAndRecordQuotaException(e)
+                }
+            }
+            val spokenText = textResponse?.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
                 ?: return@withContext null
 
             // Parse out spoken portion vs coach guidance (like *Correction:* or *Praise:*)

@@ -316,7 +316,7 @@ fun LiveCallScreen(
                 geminiNativePlayer.playNativeAudio(nativeResult.audioBytes, nativeResult.audioMimeType) {
                     isAiSpeaking = false
                     if (callState == CallState.ACTIVE && !isMuted) {
-                        speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { nextSpeech ->
+                        speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { nextSpeech ->
                             processUserTurn(nextSpeech)
                         }
                     }
@@ -332,9 +332,16 @@ fun LiveCallScreen(
                     conversationHistory = convHist
                 )
 
-                val replyText = fallbackTurn.spokenReply.ifBlank {
+                val rawReply = fallbackTurn.spokenReply.ifBlank {
                     "That's very interesting! Could you tell me a little bit more about that?"
                 }
+                val cleanReplyText = rawReply
+                    .replace(Regex("""^(\*{0,2}\(?[A-Za-z0-9_\- ]+\)?\*{0,2}:?\s*)+"""), "")
+                    .replace(Regex("""^\*+|\*+$"""), "")
+                    .replace(Regex("""^\(.*?\)\s*"""), "")
+                    .trim()
+                    .ifBlank { "That sounds great! Could you share more thoughts on this?" }
+
                 val correction = fallbackTurn.liveCorrection
                 val praise = fallbackTurn.livePraise
 
@@ -353,7 +360,7 @@ fun LiveCallScreen(
                 transcriptItems.add(
                     LiveCallTranscriptItem(
                         sender = CallSender.AI,
-                        text = replyText,
+                        text = cleanReplyText,
                         liveCorrection = correction,
                         livePraise = praise
                     )
@@ -361,10 +368,10 @@ fun LiveCallScreen(
 
                 isAiSpeaking = true
                 ttsHelper.setVoiceName(selectedTutor.edgeVoiceName)
-                ttsHelper.speak(replyText) {
+                ttsHelper.speak(cleanReplyText) {
                     isAiSpeaking = false
                     if (callState == CallState.ACTIVE && !isMuted) {
-                        speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { nextSpeech ->
+                        speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { nextSpeech ->
                             processUserTurn(nextSpeech)
                         }
                     }
@@ -411,27 +418,36 @@ fun LiveCallScreen(
                 )
             } else null
 
-            if (nativeGreeting?.audioBytes != null && nativeGreeting.audioBytes.isNotEmpty()) {
-                isAiSpeaking = true
-                geminiNativePlayer.playNativeAudio(nativeGreeting.audioBytes, nativeGreeting.audioMimeType) {
+            var greetingFinished = false
+            val startUserListening = {
+                if (!greetingFinished) {
+                    greetingFinished = true
                     isAiSpeaking = false
                     if (callState == CallState.ACTIVE && !isMuted) {
-                        speechHelper.startListening(silenceTimeoutMs = 1200L, continuous = true) { spoken ->
+                        speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { spoken ->
                             processUserTurn(spoken)
                         }
                     }
+                }
+            }
+
+            if (nativeGreeting?.audioBytes != null && nativeGreeting.audioBytes.isNotEmpty()) {
+                isAiSpeaking = true
+                geminiNativePlayer.playNativeAudio(nativeGreeting.audioBytes, nativeGreeting.audioMimeType) {
+                    startUserListening()
                 }
             } else {
                 isAiSpeaking = true
                 ttsHelper.setVoiceName(selectedTutor.edgeVoiceName)
                 ttsHelper.speak(greeting) {
-                    isAiSpeaking = false
-                    if (callState == CallState.ACTIVE && !isMuted) {
-                        speechHelper.startListening(silenceTimeoutMs = 1200L, continuous = true) { spoken ->
-                            processUserTurn(spoken)
-                        }
-                    }
+                    startUserListening()
                 }
+            }
+
+            // Safety guard: Ensure speech recognition automatically starts listening within 6 seconds max even if audio engine stalls
+            delay(6000)
+            if (!greetingFinished && callState == CallState.ACTIVE) {
+                startUserListening()
             }
         }
     }
@@ -531,7 +547,7 @@ fun LiveCallScreen(
                         
                         isAiSpeaking = false
                         if (!isMuted) {
-                            speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { spoken ->
+                            speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { spoken ->
                                 processUserTurn(spoken)
                             }
                         }
@@ -542,7 +558,7 @@ fun LiveCallScreen(
                         if (isMuted) {
                             speechHelper.stopListening()
                         } else if (!isAiSpeaking && !isAiThinking) {
-                            speechHelper.startListening(silenceTimeoutMs = 800L, continuous = true) { spoken ->
+                            speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { spoken ->
                                 processUserTurn(spoken)
                             }
                         }

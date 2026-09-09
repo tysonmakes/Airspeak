@@ -114,7 +114,7 @@ fun RoleplayScreen(
     ) { isGranted ->
         if (isGranted) {
             isRecording = true
-            speechHelper.startListening { voiceResult ->
+            speechHelper.startListening(continuous = false) { voiceResult ->
                 inputText = voiceResult
                 isRecording = false
             }
@@ -443,7 +443,7 @@ fun RoleplayScreen(
 
                             if (hasPermission) {
                                 isRecording = true
-                                speechHelper.startListening { voiceResult ->
+                                speechHelper.startListening(continuous = false) { voiceResult ->
                                     inputText = voiceResult
                                     isRecording = false
                                 }
