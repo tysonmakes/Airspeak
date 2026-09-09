@@ -124,11 +124,15 @@ fun SettingsScreen(
             if (GeminiClient.hasValidApiKey()) BuildConfig.GEMINI_API_KEY else ""
         })
     }
+    var nvidiaKeyInput by remember { mutableStateOf(aiEngineManager.getCustomNvidiaKey()) }
     var githubTokenInput by remember { mutableStateOf(aiEngineManager.getCustomGitHubToken()) }
     var showGeminiKey by remember { mutableStateOf(false) }
+    var showNvidiaKey by remember { mutableStateOf(false) }
     var showGithubToken by remember { mutableStateOf(false) }
     var isTestingGeminiKey by remember { mutableStateOf(false) }
     var geminiKeyTestResult by remember { mutableStateOf<GeminiClient.KeyTestResult?>(null) }
+    var isTestingNvidiaKey by remember { mutableStateOf(false) }
+    var nvidiaKeyTestResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
 
     // Latency testing states
     val latencyResults = remember { mutableStateMapOf<AiEngine, Long>() }
@@ -568,6 +572,159 @@ fun SettingsScreen(
                                             text = "${res.message}${if (res.latencyMs > 0) " • Latency: ${res.latencyMs}ms" else ""}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = Color.White.copy(alpha = 0.85f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // NVIDIA NIM API Key (Free Tier Cloud Inference)
+                        Text(
+                            text = "NVIDIA NIM Official Cloud API (NVIDIA Nemotron 70B)",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "NVIDIA Official Cloud microservices from build.nvidia.com. Powered directly by NVIDIA's proprietary Nemotron-70B model for ultra-fast, native conversational English tutoring.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.6f)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedTextField(
+                            value = nvidiaKeyInput,
+                            onValueChange = { nvidiaKeyInput = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("nvidia_key_input"),
+                            placeholder = { Text("nvapi-xxxxxxxxxxxxxxxxxxxx", color = Color.Gray) },
+                            singleLine = true,
+                            visualTransformation = if (showNvidiaKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showNvidiaKey = !showNvidiaKey }) {
+                                    Icon(
+                                        imageVector = if (showNvidiaKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = "Toggle visibility",
+                                        tint = Color.White.copy(alpha = 0.6f)
+                                    )
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF9D4EDD),
+                                unfocusedBorderColor = Color(0xFF383B46)
+                            )
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    aiEngineManager.setCustomNvidiaKey(nvidiaKeyInput)
+                                    Toast.makeText(context, "NVIDIA NIM Key saved!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("save_nvidia_key_btn"),
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Save Key", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    isTestingNvidiaKey = true
+                                    nvidiaKeyTestResult = null
+                                    coroutineScope.launch {
+                                        val res = aiEngineManager.testNvidiaNimKey(nvidiaKeyInput)
+                                        nvidiaKeyTestResult = res
+                                        isTestingNvidiaKey = false
+                                    }
+                                },
+                                enabled = !isTestingNvidiaKey,
+                                modifier = Modifier.testTag("test_nvidia_key_btn"),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF76B900), // NVIDIA Signature Green
+                                    contentColor = Color.Black
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                if (isTestingNvidiaKey) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = Color.Black,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Testing...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Speed,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Test Ping", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    nvidiaKeyInput = ""
+                                    nvidiaKeyTestResult = null
+                                    aiEngineManager.setCustomNvidiaKey("")
+                                    Toast.makeText(context, "NVIDIA Key cleared", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Clear", color = Color.White)
+                            }
+                        }
+
+                        // Real-time verification result feedback banner for NVIDIA NIM
+                        nvidiaKeyTestResult?.let { (isSuccess, message) ->
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSuccess) EmeraldSuccess.copy(alpha = 0.15f) else Color(0xFFFF4D4F).copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isSuccess) EmeraldSuccess else Color(0xFFFF4D4F)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = if (isSuccess) EmeraldSuccess else Color(0xFFFF4D4F),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = if (isSuccess) "✅ NVIDIA NIM Active & Verified!" else "❌ NVIDIA Verification Failed",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSuccess) EmeraldSuccess else Color(0xFFFF4D4F)
+                                        )
+                                        Text(
+                                            text = message,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.White.copy(alpha = 0.8f)
                                         )
                                     }
                                 }

@@ -176,6 +176,18 @@ class GeminiNativeAudioPlayer(private val context: Context) {
 
     fun stop() {
         try {
+            streamingJob?.cancel()
+            streamingJob = null
+            streamingAudioTrack?.apply {
+                stop()
+                release()
+            }
+            streamingAudioTrack = null
+        } catch (e: Exception) {
+            Log.w("GeminiNativeAudioPlayer", "Error stopping streamingAudioTrack: ${e.message}")
+        }
+
+        try {
             audioTrack?.apply {
                 stop()
                 release()
@@ -196,6 +208,87 @@ class GeminiNativeAudioPlayer(private val context: Context) {
         }
 
         _isPlaying.value = false
+    }
+
+    private var streamingAudioTrack: AudioTrack? = null
+    private var streamingSampleRate: Int = 24000
+    private var streamingJob: Job? = null
+
+    /**
+     * Initializes streaming mode for incoming incremental audio PCM chunks (e.g. from Gemini Live API)
+     */
+    fun startStreamingMode(sampleRate: Int = 24000) {
+        stop()
+        _isPlaying.value = true
+        streamingSampleRate = sampleRate
+        try {
+            val minBufSize = AudioTrack.getMinBufferSize(
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(maxOf(minBufSize * 2, 8192))
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+            streamingAudioTrack = track
+            track.play()
+        } catch (e: Exception) {
+            Log.e("GeminiNativeAudioPlayer", "Failed to init streaming AudioTrack", e)
+        }
+    }
+
+    /**
+     * Writes an incoming chunk of PCM audio directly into the streaming AudioTrack for instant playback.
+     */
+    fun writeStreamingChunk(pcmBytes: ByteArray) {
+        try {
+            if (streamingAudioTrack == null) {
+                startStreamingMode(streamingSampleRate)
+            }
+            streamingAudioTrack?.write(pcmBytes, 0, pcmBytes.size)
+        } catch (e: Exception) {
+            Log.e("GeminiNativeAudioPlayer", "Error writing audio chunk", e)
+        }
+    }
+
+    /**
+     * Completes the streaming playback session once all chunks have finished playing.
+     */
+    fun finishStreamingMode(onComplete: () -> Unit) {
+        streamingJob?.cancel()
+        streamingJob = coroutineScope.launch(Dispatchers.IO) {
+            try {
+                // Wait for audio track buffer to finish playing
+                val track = streamingAudioTrack
+                if (track != null) {
+                    kotlinx.coroutines.delay(250)
+                    track.stop()
+                    track.release()
+                    streamingAudioTrack = null
+                }
+            } catch (e: Exception) {
+                Log.w("GeminiNativeAudioPlayer", "Error finishing stream track: ${e.message}")
+            } finally {
+                withContext(Dispatchers.Main) {
+                    _isPlaying.value = false
+                    onComplete()
+                }
+            }
+        }
     }
 
     fun release() {

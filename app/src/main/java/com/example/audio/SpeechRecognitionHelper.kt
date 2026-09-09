@@ -241,6 +241,14 @@ class SpeechRecognitionHelper(private val context: Context) {
             return@withContext MicCheckStatus.READY
         } finally {
             try {
+                hwAgc?.release()
+                hwNs?.release()
+                hwAec?.release()
+                hwAgc = null
+                hwNs = null
+                hwAec = null
+            } catch (_: Exception) {}
+            try {
                 audioRecord?.stop()
                 audioRecord?.release()
             } catch (_: Exception) {}
@@ -262,7 +270,7 @@ class SpeechRecognitionHelper(private val context: Context) {
         resetSessionState()
 
         mainHandler.post {
-            ensureRecognizerReady()
+            ensureRecognizerReady(forceRecreate = (speechRecognizer == null))
             startListeningSession()
         }
     }
@@ -282,7 +290,7 @@ class SpeechRecognitionHelper(private val context: Context) {
         resetSessionState()
 
         mainHandler.post {
-            ensureRecognizerReady()
+            ensureRecognizerReady(forceRecreate = (speechRecognizer == null))
             startListeningSession()
         }
     }
@@ -333,9 +341,12 @@ class SpeechRecognitionHelper(private val context: Context) {
 
     /**
      * Initializes or warms up the SpeechRecognizer instance.
-     * Prefers on-device low latency engine on supported Android 12+ devices.
+     * If forceRecreate is true, cleans up any previous instance and creates a fresh instance.
      */
-    private fun ensureRecognizerReady() {
+    fun ensureRecognizerReady(forceRecreate: Boolean = false) {
+        if (forceRecreate && speechRecognizer != null) {
+            cleanupRecognizer()
+        }
         if (speechRecognizer != null) return
 
         try {
@@ -431,16 +442,18 @@ class SpeechRecognitionHelper(private val context: Context) {
 
                 // If recoverable text exists, check if we should dispatch
                 val fallbackText = getCombinedCurrentText()
+                
+                // For hardware/client/busy errors: destroy corrupted recognizer immediately
+                cleanupRecognizer()
+
                 if (fallbackText.isNotBlank() && !isDispatching && !continuousMode) {
                     isDispatching = true
                     dispatchFinalResult(fallbackText, listOf(fallbackText))
                 } else if (continuousMode && error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
-                    // Re-arm cleanly
+                    // Re-arm cleanly with fresh instance
                     mainHandler.postDelayed({
                         if (continuousMode && !isDispatching) {
-                            try {
-                                speechRecognizer?.cancel()
-                            } catch (_: Exception) {}
+                            ensureRecognizerReady(forceRecreate = true)
                             startListeningSession()
                         }
                     }, 250L)

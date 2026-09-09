@@ -80,6 +80,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -107,7 +108,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.GeminiNativeAudioPlayer
+import com.example.audio.GeminiStreamingAudioWorkflow
 import com.example.audio.SpeechRecognitionHelper
+import com.example.audio.StreamingTurnResult
 import com.example.audio.TextToSpeechHelper
 import com.example.data.local.CallSender
 import com.example.data.local.LiveCallCorrectionItem
@@ -153,10 +156,27 @@ fun LiveCallScreen(
     val aiEngineManager = remember { AiEngineManager(context) }
     val geminiNativePlayer = remember { GeminiNativeAudioPlayer(context) }
     val ttsHelper = remember { TextToSpeechHelper(context) }
+    val streamingAudioWorkflow = remember { GeminiStreamingAudioWorkflow(context, geminiNativePlayer) }
     val currentEngine by aiEngineManager.currentEngine.collectAsState()
     var showEngineSelectorDialog by remember { mutableStateOf(false) }
     var lastTurnLatencyMs by remember { mutableLongStateOf(0L) }
     var lastFallbackNotice by remember { mutableStateOf<String?>(null) }
+
+    val isAudioStreamingActive by streamingAudioWorkflow.isStreamingActive.collectAsState()
+    val isUserVoicing by streamingAudioWorkflow.isUserSpeaking.collectAsState()
+    val streamingRmsDb by streamingAudioWorkflow.rmsDb.collectAsState()
+    val streamingLiveText by streamingAudioWorkflow.currentLiveTranscript.collectAsState()
+    val streamingAiReply by streamingAudioWorkflow.aiStreamingReply.collectAsState()
+    val streamingLatencyMs by streamingAudioWorkflow.streamingLatencyMs.collectAsState()
+    val streamingChunksCount by streamingAudioWorkflow.chunksStreamedCount.collectAsState()
+    val workflowStatus by streamingAudioWorkflow.workflowStatus.collectAsState()
+    val isWorkflowAiSpeaking by streamingAudioWorkflow.isAiSpeaking.collectAsState()
+
+    DisposableEffect(Unit) {
+        onDispose {
+            streamingAudioWorkflow.stopStreamingWorkflow()
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -206,6 +226,53 @@ fun LiveCallScreen(
                 callDurationSeconds++
             }
         }
+    }
+
+    fun handleStreamingTurnResult(turnResult: StreamingTurnResult) {
+        val userClean = turnResult.userSpeech.trim()
+        val aiClean = turnResult.aiReply.trim()
+        if (turnResult.latencyMs > 0) {
+            lastTurnLatencyMs = turnResult.latencyMs
+        }
+
+        if (userClean.isNotBlank()) {
+            val words = userClean.split("\\s+".toRegex()).filter { it.isNotBlank() }
+            totalWordsSpoken += words.size
+            val fillers = listOf("um", "uh", "like", "actually", "basically", "you know")
+            for (f in fillers) {
+                fillerWordsCount += Regex("\\b$f\\b", RegexOption.IGNORE_CASE).findAll(userClean).count()
+            }
+            transcriptItems.add(
+                LiveCallTranscriptItem(
+                    sender = CallSender.USER,
+                    text = userClean
+                )
+            )
+        }
+
+        if (!turnResult.correction.isNullOrBlank()) {
+            val corrItem = LiveCallCorrectionItem(
+                originalSaid = userClean.ifBlank { "Speaking Turn" },
+                correctedVersion = turnResult.correction,
+                reason = "Live syntax / fluency correction"
+            )
+            activeCorrection = corrItem
+            sessionCorrections.add(corrItem)
+            activeCoachTip = "💡 ${turnResult.correction}"
+        } else {
+            activeCorrection = null
+            activeCoachTip = turnResult.praise
+        }
+        latestPraise = turnResult.praise
+
+        transcriptItems.add(
+            LiveCallTranscriptItem(
+                sender = CallSender.AI,
+                text = aiClean,
+                liveCorrection = turnResult.correction,
+                livePraise = turnResult.praise
+            )
+        )
     }
 
     // Helper: Turn processing
@@ -315,9 +382,12 @@ fun LiveCallScreen(
                 isAiSpeaking = true
                 geminiNativePlayer.playNativeAudio(nativeResult.audioBytes, nativeResult.audioMimeType) {
                     isAiSpeaking = false
-                    if (callState == CallState.ACTIVE && !isMuted) {
-                        speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { nextSpeech ->
-                            processUserTurn(nextSpeech)
+                    coroutineScope.launch {
+                        kotlinx.coroutines.delay(120L)
+                        if (callState == CallState.ACTIVE && !isMuted) {
+                            speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { nextSpeech ->
+                                processUserTurn(nextSpeech)
+                            }
                         }
                     }
                 }
@@ -370,9 +440,12 @@ fun LiveCallScreen(
                 ttsHelper.setVoiceName(selectedTutor.edgeVoiceName)
                 ttsHelper.speak(cleanReplyText) {
                     isAiSpeaking = false
-                    if (callState == CallState.ACTIVE && !isMuted) {
-                        speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { nextSpeech ->
-                            processUserTurn(nextSpeech)
+                    coroutineScope.launch {
+                        kotlinx.coroutines.delay(120L)
+                        if (callState == CallState.ACTIVE && !isMuted) {
+                            speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { nextSpeech ->
+                                processUserTurn(nextSpeech)
+                            }
                         }
                     }
                 }
@@ -424,8 +497,21 @@ fun LiveCallScreen(
                     greetingFinished = true
                     isAiSpeaking = false
                     if (callState == CallState.ACTIVE && !isMuted) {
+                        if (GeminiClient.hasValidApiKey()) {
+                            streamingAudioWorkflow.startStreamingWorkflow(
+                                tutorName = selectedTutor.name,
+                                tutorPersona = selectedTutor.bio,
+                                topic = selectedTopic,
+                                voiceName = selectedTutor.geminiVoiceName,
+                                onTurnComplete = { turnResult ->
+                                    handleStreamingTurnResult(turnResult)
+                                }
+                            )
+                        }
                         speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { spoken ->
-                            processUserTurn(spoken)
+                            if (!isAudioStreamingActive) {
+                                processUserTurn(spoken)
+                            }
                         }
                     }
                 }
@@ -453,6 +539,7 @@ fun LiveCallScreen(
     }
 
     fun endCall() {
+        streamingAudioWorkflow.stopStreamingWorkflow()
         speechHelper.stopListening()
         geminiNativePlayer.stop()
         ttsHelper.stop()
@@ -527,28 +614,48 @@ fun LiveCallScreen(
                     tutor = selectedTutor,
                     topic = selectedTopic,
                     callDurationSeconds = callDurationSeconds,
-                    isAiSpeaking = isAiSpeaking,
+                    isAiSpeaking = isAiSpeaking || isWorkflowAiSpeaking,
                     isAiThinking = isAiThinking,
-                    isListening = isListening,
+                    isListening = isListening || (isAudioStreamingActive && !isAiSpeaking && !isWorkflowAiSpeaking && !isMuted),
                     isMuted = isMuted,
-                    currentSpeechText = currentSpeechText,
-                    rmsDb = rmsDb,
+                    currentSpeechText = if (isAudioStreamingActive && streamingLiveText.isNotBlank()) streamingLiveText else currentSpeechText,
+                    rmsDb = if (isAudioStreamingActive) streamingRmsDb else rmsDb,
                     activeCoachTip = activeCoachTip,
                     activeCorrection = activeCorrection,
                     transcriptItems = transcriptItems,
                     showSubtitles = showSubtitles,
                     currentEngine = currentEngine,
-                    lastTurnLatencyMs = lastTurnLatencyMs,
+                    lastTurnLatencyMs = if (streamingLatencyMs > 0) streamingLatencyMs else lastTurnLatencyMs,
                     lastFallbackNotice = lastFallbackNotice,
+                    isStreamingActive = isAudioStreamingActive,
+                    streamingChunksCount = streamingChunksCount,
+                    workflowStatus = workflowStatus,
                     onOpenEngineSelector = { showEngineSelectorDialog = true },
-                    onCompleteSpeechNow = { speechHelper.completeSpeechNow() },
+                    onCompleteSpeechNow = {
+                        streamingAudioWorkflow.completeSpeechNow()
+                        speechHelper.completeSpeechNow()
+                    },
                     onInterruptTutor = {
                         geminiNativePlayer.stop()
-                        
+                        ttsHelper.stop()
+                        streamingAudioWorkflow.interruptTutor()
                         isAiSpeaking = false
                         if (!isMuted) {
+                            if (GeminiClient.hasValidApiKey()) {
+                                streamingAudioWorkflow.startStreamingWorkflow(
+                                    tutorName = selectedTutor.name,
+                                    tutorPersona = selectedTutor.bio,
+                                    topic = selectedTopic,
+                                    voiceName = selectedTutor.geminiVoiceName,
+                                    onTurnComplete = { turnResult ->
+                                        handleStreamingTurnResult(turnResult)
+                                    }
+                                )
+                            }
                             speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { spoken ->
-                                processUserTurn(spoken)
+                                if (!isAudioStreamingActive) {
+                                    processUserTurn(spoken)
+                                }
                             }
                         }
                     },
@@ -556,10 +663,24 @@ fun LiveCallScreen(
                     onToggleMute = {
                         isMuted = !isMuted
                         if (isMuted) {
+                            streamingAudioWorkflow.stopStreamingWorkflow()
                             speechHelper.stopListening()
-                        } else if (!isAiSpeaking && !isAiThinking) {
+                        } else if (!isAiSpeaking && !isAiThinking && !isWorkflowAiSpeaking) {
+                            if (GeminiClient.hasValidApiKey()) {
+                                streamingAudioWorkflow.startStreamingWorkflow(
+                                    tutorName = selectedTutor.name,
+                                    tutorPersona = selectedTutor.bio,
+                                    topic = selectedTopic,
+                                    voiceName = selectedTutor.geminiVoiceName,
+                                    onTurnComplete = { turnResult ->
+                                        handleStreamingTurnResult(turnResult)
+                                    }
+                                )
+                            }
                             speechHelper.startListening(silenceTimeoutMs = 1100L, continuous = true) { spoken ->
-                                processUserTurn(spoken)
+                                if (!isAudioStreamingActive) {
+                                    processUserTurn(spoken)
+                                }
                             }
                         }
                     },
@@ -1177,6 +1298,9 @@ private fun ActiveCallView(
     currentEngine: AiEngine,
     lastTurnLatencyMs: Long,
     lastFallbackNotice: String?,
+    isStreamingActive: Boolean = false,
+    streamingChunksCount: Int = 0,
+    workflowStatus: String = "Idle",
     onOpenEngineSelector: () -> Unit,
     onCompleteSpeechNow: () -> Unit,
     onInterruptTutor: () -> Unit,
@@ -1332,6 +1456,45 @@ private fun ActiveCallView(
             }
         }
 
+        // Real-Time Audio Chunk Streaming Badge
+        if (isStreamingActive) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 3.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.GraphicEq,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (workflowStatus.contains("Gemini Live", ignoreCase = true)) "⚡ Gemini Live Bidi Streaming" else "⚡ Audio Chunk Streaming (100ms)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                    Text(
+                        text = "Chunk #$streamingChunksCount",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(10.dp))
 
         // Live Voice Status Indicator Pill
@@ -1373,6 +1536,7 @@ private fun ActiveCallView(
                     text = when {
                         isAiSpeaking -> "${tutor.name} is speaking..."
                         isAiThinking -> "⚡ ${currentEngine.displayName} replying..."
+                        isListening && isStreamingActive -> "⚡ Streaming audio to Gemini as you speak..."
                         isListening -> "Listening to you... (Speak naturally)"
                         isMuted -> "Microphone is Muted"
                         else -> "Ready to listen"

@@ -144,6 +144,7 @@ fun AiEngineSelectionDialog(
                                     Icon(
                                         imageVector = when (engine) {
                                             AiEngine.GEMINI_25_FLASH -> Icons.Default.Bolt
+                                            AiEngine.NVIDIA_NIM -> Icons.Default.AutoAwesome
                                             AiEngine.GITHUB_MODELS -> Icons.Default.Psychology
                                             AiEngine.POLLINATIONS_DEEPSEEK -> Icons.Default.Cloud
                                             AiEngine.POLLINATIONS_MISTRAL -> Icons.Default.AutoAwesome
@@ -154,6 +155,7 @@ fun AiEngineSelectionDialog(
                                         contentDescription = null,
                                         tint = when (engine) {
                                             AiEngine.GEMINI_25_FLASH -> AmberTertiary
+                                            AiEngine.NVIDIA_NIM -> EmeraldSuccess
                                             AiEngine.GITHUB_MODELS -> IndigoPrimary
                                             AiEngine.POLLINATIONS_DEEPSEEK -> CyanSecondary
                                             AiEngine.POLLINATIONS_MISTRAL -> AmberTertiary
